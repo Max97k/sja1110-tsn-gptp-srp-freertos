@@ -10,7 +10,7 @@
  @details
 */
 
-#include "managed_objects.h"
+#include "common/managed_objects.h"
 
 #include "os/string.h"
 

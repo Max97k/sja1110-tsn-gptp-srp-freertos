@@ -42,6 +42,7 @@ extern "C"{
 #include "ComStackTypes.h"
 #include "EthIf.h"
 #include "gptp_port_platform.h"
+#include "srp_port.h"
 /*==================================================================================================
 *                              SOURCE FILE VERSION INFORMATION
 ==================================================================================================*/
@@ -148,8 +149,11 @@ void EthIf_RxIndication(\
                         const Eth_DataType* DataPtr,\
                         uint16 LenByte)
 {
-    /* This is an empty stub function */
-	GPTP_PORT_RxIndication(CtrlIdx, FrameType, IsBroadcast, PhysAddrPtr, DataPtr, LenByte);
+    /* Dispatch IEEE 802.1Qat SRP/MRP frames first; otherwise pass to gPTP */
+    if (!SRP_PORT_RxIndication(CtrlIdx, FrameType, IsBroadcast, PhysAddrPtr, DataPtr, LenByte))
+    {
+        GPTP_PORT_RxIndication(CtrlIdx, FrameType, IsBroadcast, PhysAddrPtr, DataPtr, LenByte);
+    }
 }
 
 

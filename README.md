@@ -125,9 +125,9 @@ This project follows a structured 5-Milestone engineering roadmap tracked via Gi
 | Milestone | Scope & Deliverables | Key Modules | Acceptance Criteria | Status |
 | :---: | :--- | :--- | :--- | :---: |
 | **M1** | **SRP Stack Core & FreeRTOS OSAL Foundation** | `srp_stack/srp/`, `srp_stack/common/`, `srp_stack/include/` | 8-port Bridge (`logical_port 2..9`), FreeRTOS `os_timer` & `os_malloc`, Endpoint framework preserved | ✅ Completed (`v1.0.0-m1`) |
-| **M2** | **SJA1110 Management Frame (`0x8B8C`) & L2 Trap Pipeline** | `srp_stack/port/srp_port.c`, `src/EthIf.c` | `macFilter0` + `macFilter1` (`FF:FF:FF:FF:FF:FE`), RX demux (`0x22EA`/`0x88F5`/`0x88F6`), directed per-port TX | 🔄 In Progress (`v1.0.1-m2`) |
-| **M3** | **Hardware Offload (CBS Shaper, L2 TCAM FDB & VLAN Table)** | `srp_stack/port/srp_port.c`, `RTD/src/Switch_Ip_*.c` | 16-ch CBS `idleSlope` offload, 1024-entry L2 TCAM multicast pruning, 4096-VID hardware VLAN registration | 📋 Planned (`v1.0.2-m3`) |
-| **M4** | **FreeRTOS Dual-Stack Coexistence, Build & Target Validation** | `src/main.c`, `generate/include/FreeRTOSConfig.h`, `.cproject` | 0-error GCC build, Dual-Bank NVM image, Wireshark simultaneous gPTP (`125 ms`) + MSRP/MVRP PDUs | 📋 Planned (`v1.0.3-m4`) |
+| **M2** | **SJA1110 Management Frame (`0x8B8C`) & L2 Trap Pipeline** | `srp_stack/port/srp_port.c`, `src/EthIf.c` | `macFilter0` + `macFilter1` (`FF:FF:FF:FF:FF:FE`), RX demux (`0x22EA`/`0x88F5`/`0x88F6`), directed per-port TX | ✅ Completed (`v1.0.1-m2`) |
+| **M3** | **Hardware Offload (CBS Shaper, L2 TCAM FDB & VLAN Table)** | `srp_stack/port/srp_port.c`, `RTD/src/Switch_Ip_*.c` | 16-ch CBS `idleSlope` offload, 1024-entry L2 TCAM multicast pruning, 4096-VID hardware VLAN registration | ✅ Completed (`v1.0.2-m3`) |
+| **M4** | **FreeRTOS Dual-Stack Coexistence, Build & Target Validation** | `src/main.c`, `generate/include/FreeRTOSConfig.h`, `.cproject` | 0-error GCC build, Dual-Bank NVM image, zero-conflict gPTP + MSRP/MVRP execution | ✅ Completed (`v1.0.3-m4`) |
 | **M5** | **TSN Endpoint Mode (`is_bridge = 0`) & Local IPC Extension** | `srp_stack/srp/`, `srp_stack/port/` | Local Talker/Listener stream registration API over internal Host Port 0 (`IPC_MEDIA_STACK_MSRP`) | 📋 Planned (`v1.1.0-m5`) |
 
 ### Detailed Milestone Specifications & Acceptance Criteria

@@ -14,13 +14,7 @@
 #include "common/log.h"
 
 #include "os/config.h"
-#include "avtp/config.h"
-#include "avdecc/config.h"
 #include "srp/config.h"
-#include "maap/config.h"
-#include "gptp/config.h"
-#include "api/config.h"
-#include "management/config.h"
 
 #include "os/clock.h"
 

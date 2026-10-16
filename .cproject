@@ -40,6 +40,10 @@
 									<listOptionValue builtIn="false" value="../FreeRTOS/Source/portable/GCC/ARM_CM7/r0p1"/>
 									<listOptionValue builtIn="false" value="../gptp_stack/gptp_core/include"/>
 									<listOptionValue builtIn="false" value="../gptp_stack/port"/>
+									<listOptionValue builtIn="false" value="../srp_stack"/>
+									<listOptionValue builtIn="false" value="../srp_stack/include"/>
+									<listOptionValue builtIn="false" value="../srp_stack/include/genavb"/>
+									<listOptionValue builtIn="false" value="../srp_stack/port"/>
 									<listOptionValue builtIn="false" value="&quot;${ProjDirPath}/include&quot;"/>
 									<listOptionValue builtIn="false" value="${ProjDirPath}/generate/include"/>
 									<listOptionValue builtIn="false" value="${ProjDirPath}/RTD/include"/>
@@ -189,6 +193,7 @@
 						<entry excluding="src" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="generate"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="generate/src"/>
 						<entry flags="LOCAL|VALUE_WORKSPACE_PATH" kind="sourcePath" name="gptp_stack"/>
+						<entry flags="LOCAL|VALUE_WORKSPACE_PATH" kind="sourcePath" name="srp_stack"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="include"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="src"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="tool"/>
@@ -236,6 +241,10 @@
 									<listOptionValue builtIn="false" value="../FreeRTOS/Source/portable/GCC/ARM_CM7/r0p1"/>
 									<listOptionValue builtIn="false" value="../gptp_stack/gptp_core/include"/>
 									<listOptionValue builtIn="false" value="../gptp_stack/port"/>
+									<listOptionValue builtIn="false" value="../srp_stack"/>
+									<listOptionValue builtIn="false" value="../srp_stack/include"/>
+									<listOptionValue builtIn="false" value="../srp_stack/include/genavb"/>
+									<listOptionValue builtIn="false" value="../srp_stack/port"/>
 									<listOptionValue builtIn="false" value="&quot;${ProjDirPath}/RTD/include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${ProjDirPath}/include&quot;"/>
 									<listOptionValue builtIn="false" value="${ProjDirPath}/generate/include"/>
@@ -385,6 +394,7 @@
 						<entry excluding="src" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="generate"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="generate/src"/>
 						<entry flags="LOCAL|VALUE_WORKSPACE_PATH" kind="sourcePath" name="gptp_stack"/>
+						<entry flags="LOCAL|VALUE_WORKSPACE_PATH" kind="sourcePath" name="srp_stack"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="include"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="src"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="tool"/>

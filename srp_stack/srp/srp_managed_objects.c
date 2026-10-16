@@ -10,6 +10,7 @@
  @details
 */
 
+#include "config.h" /* SRP static config (GenAVB used -include srp/config.h) */
 #include "srp_managed_objects.h"
 #include "srp.h"
 

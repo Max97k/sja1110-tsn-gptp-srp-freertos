@@ -25,6 +25,7 @@ extern "C" {
 
 #include "example_init.h"
 #include "timers.h"
+#include "srp_port.h"
 
 /*==================================================================================================
 *                                       LOCAL MACROS
@@ -405,6 +406,7 @@ static void gPTPTask(void *pvParameters)
         GPTP_TimerPeriodic();
         Eth_Main();
         Eth_Poll();
+        SRP_PORT_Periodic();
 
         /* Poll FLASH write function. */
         FLASH_Write_Poll();
@@ -479,6 +481,9 @@ int main(void)
     {
         sbGptpInitialized = true;
     }
+
+    /* Initialize IEEE 802.1Qat SRP Stack (Bridge Mode: MSRP, MVRP, MMRP + FQTSS/CBS). */
+    (void)SRP_PORT_Init();
 
     if (sbGptpInitialized)
     {

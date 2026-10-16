@@ -10,7 +10,7 @@
  @details
 */
 
-#include "random.h"
+#include "common/random.h"
 #include "os/stdlib.h"
 
 /**

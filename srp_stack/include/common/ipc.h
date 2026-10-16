@@ -483,7 +483,10 @@ struct ipc_desc {
 
 		struct ipc_heartbeat hearbeat;
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 		u8 data[0];
+#pragma GCC diagnostic pop
 	} u;
 };
 

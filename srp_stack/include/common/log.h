@@ -86,6 +86,15 @@ extern u64 log_time_ns;
 
 #include "os/log.h"
 
+/* SJA1110 port: GenAVB injects these per library via CMake (-D_COMPONENT_ID_=<lib>_COMPONENT_ID).
+ * The S32DS managed build has no per-folder defines, so default everything to the SRP component. */
+#ifndef _COMPONENT_ID_
+#define _COMPONENT_ID_	srp_COMPONENT_ID
+#endif
+#ifndef _COMPONENT_STR_
+#define _COMPONENT_STR_	"srp"
+#endif
+
 #define os_log(level, ...) do {	\
 	if (((level) & LOG_LEVEL_MASK) <= log_component_lvl[_COMPONENT_ID_]) {	\
 		if ((level) & LOG_OPT_RAW) {	\

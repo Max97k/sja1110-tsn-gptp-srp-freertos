@@ -10,6 +10,7 @@
  * @details
  */
 
+#include "config.h" /* SRP static config (GenAVB used -include srp/config.h) */
 #include "mvrp_map.h"
 
 /** Get the MVRP MAP context associated to the VLAN ID

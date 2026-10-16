@@ -16,7 +16,7 @@
 
 #include "common/log.h"
 
-#include "fqtss.h"
+#include "common/fqtss.h"
 
 /* Local FQTSS layer data to track bandwidth usage per logical port and per SR class (802.1Q-2022, 12.20) */
 static struct fqtss_port_params fqtss_port_params[CFG_MAX_LOGICAL_PORTS];

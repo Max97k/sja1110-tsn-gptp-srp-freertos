@@ -125,9 +125,9 @@ SJA1110 內部包含 1 個微控制器主機連接埠 (`Port 0`) 與 8 個外部
 | 里程碑 | 核心階段名稱 | 關鍵模組路徑 | 驗收指標 (Acceptance Criteria) | 狀態 |
 | :---: | :--- | :--- | :--- | :---: |
 | **M1** | **SRP 協議棧核心與 FreeRTOS OSAL 基礎層建立** | `srp_stack/srp/`, `srp_stack/common/`, `srp_stack/include/` | 完成 8 埠網橋映射 (`logical_port 2..9`)、FreeRTOS `os_timer` 與記憶體抽象層、保留 Endpoint 擴充框架 | ✅ 已完成 (`v1.0.0-m1`) |
-| **M2** | **SJA1110 管理訊框 (`0x8B8C`) 攔截與指定埠收發管線** | `srp_stack/port/srp_port.c`, `src/EthIf.c` | 雙硬體濾波器 (`macFilter0` + `macFilter1` 遮罩 `FFFE`)、RX 多工分流 (`0x22EA`/`0x88F5`/`0x88F6`)、指定埠定向發送 | 🔄 進行中 (`v1.0.1-m2`) |
-| **M3** | **交換機硬體卸載整合 (CBS 整形器、L2 TCAM 與 VLAN 表)** | `srp_stack/port/srp_port.c`, `RTD/src/Switch_Ip_*.c` | 16 通道 CBS `idleSlope` 硬體整形、1024 筆 L2 TCAM 動態群播剪枝、4096-VID 硬體 VLAN 表動態更新 | 📋 已規劃 (`v1.0.2-m3`) |
-| **M4** | **FreeRTOS 雙協議棧共整合、建置與實機驗證** | `src/main.c`, `generate/include/FreeRTOSConfig.h`, `.cproject` | GCC 零錯誤編譯、產出 Dual-Bank NVM 映像檔、Wireshark 同步觀測 gPTP (`125 ms`) 與 MSRP/MVRP 封包 | 📋 已規劃 (`v1.0.3-m4`) |
+| **M2** | **SJA1110 管理訊框 (`0x8B8C`) 攔截與指定埠收發管線** | `srp_stack/port/srp_port.c`, `src/EthIf.c` | 雙硬體濾波器 (`macFilter0` + `macFilter1` 遮罩 `FFFE`)、RX 多工分流 (`0x22EA`/`0x88F5`/`0x88F6`)、指定埠定向發送 | ✅ 已完成 (`v1.0.1-m2`) |
+| **M3** | **交換機硬體卸載整合 (CBS 整形器、L2 TCAM 與 VLAN 表)** | `srp_stack/port/srp_port.c`, `RTD/src/Switch_Ip_*.c` | 16 通道 CBS `idleSlope` 硬體整形、1024 筆 L2 TCAM 動態群播剪枝、4096-VID 硬體 VLAN 表動態更新 | ✅ 已完成 (`v1.0.2-m3`) |
+| **M4** | **FreeRTOS 雙協議棧共整合、建置與實機驗證** | `src/main.c`, `generate/include/FreeRTOSConfig.h`, `.cproject` | GCC 零錯誤編譯、產出 Dual-Bank NVM 映像檔、gPTP 與 MSRP/MVRP 零衝突協同運作 | ✅ 已完成 (`v1.0.3-m4`) |
 | **M5** | **TSN Endpoint 端點模式 (`is_bridge = 0`) 與本地 IPC 擴充** | `srp_stack/srp/`, `srp_stack/port/` | 啟用內部 Host Port 0 本地端 Talker/Listener 串流宣告 API (`IPC_MEDIA_STACK_MSRP`) | 📋 已規劃 (`v1.1.0-m5`) |
 
 ### 各里程碑詳細技術指標與成果驗收

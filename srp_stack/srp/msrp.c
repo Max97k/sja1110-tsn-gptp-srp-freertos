@@ -12,6 +12,7 @@
 */
 
 
+#include "config.h" /* SRP static config (GenAVB used -include srp/config.h) */
 #include "os/stdlib.h"
 #include "os/string.h"
 #include "os/fdb.h"

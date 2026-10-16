@@ -19,7 +19,11 @@
 #include "common/filter.h"
 #include "common/timer.h"
 
-#include "gptp/config.h"
+/* SJA1110 port: GenAVB gptp/ is not ported (NXP gPTP stack is used instead).
+ * Only CFG_GPTP_MAX_NUM_PORT is needed here; mirror GenAVB gptp/config.h. */
+#ifndef CFG_GPTP_MAX_NUM_PORT
+#define CFG_GPTP_MAX_NUM_PORT	CFG_MAX_NUM_PORT
+#endif
 
 #define PTP_MAXFREQ_PPB	200000 /* Maximum allowed clock frequency offset per 802.1AS, in parts per billion (100ppm from TAI, so 200ppm between 2 clocks) */
 

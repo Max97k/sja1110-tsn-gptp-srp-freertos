@@ -10,6 +10,7 @@
  * @details
  */
 
+#include "config.h" /* SRP static config (GenAVB used -include srp/config.h) */
 #include "msrp_map.h"
 #include "os/fdb.h"
 #include "common/fqtss.h"
