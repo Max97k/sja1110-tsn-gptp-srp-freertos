@@ -1533,6 +1533,12 @@ void SRP_PORT_Periodic(void)
         return;
     }
 
+    if (g_srp_run_selftest != 0U)
+    {
+        g_srp_run_selftest = 0U;
+        SRP_PORT_RunSelfTest();
+    }
+
     now_tick = xTaskGetTickCount();
 
     /* 1. Dispatch queued MRP RX frames to srp_net_rx */
@@ -1682,4 +1688,39 @@ int SRP_PORT_SendIpcMessage(unsigned int ipc_id, uint32_t type, const void *payl
     ch->count++;
 
     return 0;
+}
+
+/* Global trigger and status flags for FreeMASTER / Debugger / Button */
+volatile uint8_t g_srp_run_selftest = 0U;
+volatile uint8_t g_srp_selftest_done = 0U;
+volatile int g_srp_selftest_vlan_res = -1;
+volatile int g_srp_selftest_fdb_res  = -1;
+volatile int g_srp_selftest_cbs_res  = -1;
+
+void SRP_PORT_RunSelfTest(void)
+{
+    struct genavb_vlan_port_map vmap;
+    uint8_t test_stream_da[6] = {0x91U, 0xE0U, 0xF0U, 0x00U, 0xFEU, 0x00U};
+
+    if (g_srp_bridge_ctx == NULL)
+    {
+        return;
+    }
+
+    /* 1. Test MVRP dynamic VLAN registration (VID = 2, via Logical Port 5 = SwitchPort 4) */
+    vmap.port_id = 5U;   /* GenAVB logical_port 5 = SJA1110 SwitchPortIdx 4 */
+    vmap.control = GENAVB_VLAN_ADMIN_CONTROL_REGISTERED;
+    g_srp_selftest_vlan_res = vlan_update(2U, true, &vmap);
+
+    /* 2. Test L2 TCAM dynamic stream multicast forwarding rule */
+    /* Stream DA = 91:E0:F0:00:FE:00, VID = 2, forward to SwitchPort 4 */
+    g_srp_selftest_fdb_res = fdb_update(5U /* SwitchPort 4 */, test_stream_da, 2U,
+                                        true, GENAVB_FDB_PORT_CONTROL_FORWARDING);
+
+    /* 3. Test IEEE 802.1Qav CBS hardware shaper offload */
+    /* SwitchPort 4, SR Class A (Traffic Class 7, Priority 3), IdleSlope = 16.384 Mbps */
+    g_srp_selftest_cbs_res = common_fqtss_stream_add(5U /* SwitchPort 4 */, NULL, 2U, 3U,
+                                                    16384000ULL, true);
+
+    g_srp_selftest_done = 1U;
 }

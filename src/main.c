@@ -489,6 +489,9 @@ int main(void)
     /* Initialize IEEE 802.1Qat SRP Stack (Bridge Mode: MSRP, MVRP, MMRP + FQTSS/CBS). */
     (void)SRP_PORT_Init();
 
+    /* Execute built-in hardware self-test (Milestone T3: MVRP, FDB TCAM, CBS offload) */
+    SRP_PORT_RunSelfTest();
+
     if (sbGptpInitialized)
     {
         xTaskCreate(gPTPTask, "gPTPTask", gPTPTask_STACK_SIZE, NULL, gPTPTask_TASK_PRIORITY, &gPTPTaskTaskHandle);

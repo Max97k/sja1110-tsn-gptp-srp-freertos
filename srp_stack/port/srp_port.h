@@ -82,6 +82,21 @@ boolean SRP_PORT_RxIndication(uint8 u8CtrlIdx,
  */
 int SRP_PORT_SendIpcMessage(unsigned int ipc_id, uint32_t type, const void *payload, unsigned int len);
 
+/**
+ * @brief Run the built-in self-test (T3 milestone verification).
+ *
+ * Simulates MVRP VID 2 registration, L2 TCAM stream multicast forwarding,
+ * and CBS hardware shaper configuration on SwitchPort 4.
+ */
+void SRP_PORT_RunSelfTest(void);
+
+/** Global trigger and status flags for FreeMASTER / Debugger / Self-Test */
+extern volatile uint8_t g_srp_run_selftest;
+extern volatile uint8_t g_srp_selftest_done;
+extern volatile int g_srp_selftest_vlan_res;
+extern volatile int g_srp_selftest_fdb_res;
+extern volatile int g_srp_selftest_cbs_res;
+
 #ifdef __cplusplus
 }
 #endif

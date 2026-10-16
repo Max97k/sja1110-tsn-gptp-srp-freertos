@@ -1,2 +1,2 @@
-1,,
+1,,BOARD_InitPeripherals
 BOARD_InitPeripherals,PC,ClockConfig0

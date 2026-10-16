@@ -183,11 +183,14 @@ void HandlePeripheralInterrupts(uint32 gpioFlags)
     }
 }
 
+extern void SRP_PORT_RunSelfTest(void);
+
 void HandleButtonInterrupts(uint32 gpioFlags)
 {
     if (gpioFlags & (1U << IRQ_SWT_BUTTON1))
     {
         SJA1110_SetRGBLed(SJA1110_LEDCOLOR_MAGENTA);
+        SRP_PORT_RunSelfTest();
     }
 
     if (gpioFlags & (1U << IRQ_SWT_BUTTON2))
