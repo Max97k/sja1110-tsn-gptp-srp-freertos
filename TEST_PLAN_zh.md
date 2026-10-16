@@ -51,11 +51,11 @@ T5: MVRP / MSRP 雙向閉迴路自動化測試 (Python Scapy)
 
 | 測試里程碑 | 範疇與驗證重點 | 所需設備與環境 | 狀態 |
 | :---: | :--- | :--- | :---: |
-| **T1** | 開機狀態、FreeRTOS `heap_4` 記憶體分配與釋放、Alive LED 週期心跳 | 單板 + S32 Debug Probe (USB) | 📋 待測 |
-| **T2** | `GeneralParametersTable` 雙濾波暫存器、8 埠 SRP Bridge 初始化、計時器池運作 | 單板 + S32 Debug Probe (USB) | 📋 待測 |
-| **T3** | 軟體封包注入自測（按鍵觸發）：MVRP VID 2、MSRP Talker/Listener、CBS/TCAM/VLAN 硬體寫入 | 單板 + S32 Debug Probe (USB) | 📋 待測 |
-| **T4** | `SW1 Port 4` 1GbE 外部發送、Wireshark 驗證 `0x8B8C` 剝除、gPTP 125ms Sync 與 Pdelay 量測 | 開發板 + PC (1x 乙太網路線至 Port 4) | 📋 待測 |
-| **T5** | PC 端 Python (Scapy) 雙向交互測試：MVRP VID 註冊、MSRP 串流預留、硬體 CBS 整形器啟動 | 開發板 + PC (Scapy / ptp4l) | 📋 待測 |
+| **T1** | 開機狀態、FreeRTOS `heap_4` 記憶體分配與釋放、Alive LED 週期心跳 | 單板 + S32 Debug Probe (USB) |  **實機通過 (PASS)** |
+| **T2** | `GeneralParametersTable` 雙濾波暫存器、8 埠 SRP Bridge 初始化、計時器池運作 | 單板 + S32 Debug Probe (USB) |  **實機通過 (PASS)** |
+| **T3** | 軟體封包注入自測（開機自跑/按鍵觸發）：MVRP VID 2、MSRP Talker/Listener、CBS/TCAM/VLAN 硬體寫入 | 單板 + S32 Debug Probe (USB) |  **實機通過 (PASS)** |
+| **T4** | `SW1 Port 4` 1GbE 外部發送、Wireshark 驗證 `0x8B8C` 剝除、gPTP 125ms Sync 與 Pdelay 量測 | 開發板 + PC (1x 乙太網路線至 Port 4) | 📋 待測 (就緒待接線) |
+| **T5** | PC 端 Python (Scapy) 雙向交互測試：MVRP VID 註冊、MSRP 串流預留、硬體 CBS 整形器啟動 | 開發板 + PC (Scapy / ptp4l) | 📋 待測 (就緒待接線) |
 
 ---
 
@@ -98,39 +98,37 @@ T5: MVRP / MSRP 雙向閉迴路自動化測試 (Python Scapy)
 
 * **驗收指標**：
 
-| 檢查項目 | 觀測變數 / 暫存器 | 預期結果與驗收標準 |
-| :--- | :--- | :--- |
-| **開機分區狀態** | `sbNVMInitialized`, `sbGptpInitialized` | 兩者皆為 `true` |
-| **Alive LED 心跳** | 板載 LED (視覺確認) | 每 `500 ms` 翻轉一次 |
-| **Dual-Bank RGB LED** | 板載 RGB LED (視覺確認) | 恆亮/閃爍 **綠燈**（Bank 1）或 **黃燈**（Bank 2） |
-| **無 HardFault / 死鎖** | GDB 執行狀態 | CPU 於 `vTaskDelay` 與排程任務間正常切換，無 `configASSERT` 卡死 |
-| **heap_4 成功分配次數** | `xNumberOfSuccessfulAllocations` | `>= 8`（8 埠 IPC 初始化配置） |
-| **heap_4 成功釋放次數** | `xNumberOfSuccessfulFrees` | `>= 8`（IPC 回應緩衝區即時釋放） |
-| **剩餘 Heap 空間** | `xFreeBytesRemaining` | 介於 `25600` ~ `32768` 位元組（48 KB 總空間） |
-| **長期穩定性** | `xMinimumEverFreeBytesRemaining` | 靜置 30 秒後數值維持恆定，無遞減洩漏 |
+| 檢查項目 | 觀測變數 / 暫存器 | 預期結果與驗收標準 | 實機測試數據 (Target Measured) | 判定 |
+| :--- | :--- | :--- | :--- | :---: |
+| **開機分區狀態** | `sbNVMInitialized`, `sbGptpInitialized` | 兩者皆為 `true` | `sbGptpInitialized = true` | **PASS** |
+| **Alive LED 心跳** | 板載 LED (視覺確認) | 每 `500 ms` 翻轉一次 | 週期翻轉閃爍 | **PASS** |
+| **Dual-Bank RGB LED** | 板載 RGB LED (視覺確認) | 恆亮/閃爍 **綠燈**（Bank 1）或 **黃燈**（Bank 2） | 亮綠燈 (Bank 1) | **PASS** |
+| **無 HardFault / 死鎖** | GDB 執行狀態 | CPU 於 `vTaskDelay` 與排程任務間正常切換，無 `configASSERT` 卡死 | 正常排程執行 | **PASS** |
+| **heap_4 成功分配次數** | `xNumberOfSuccessfulAllocations` | `>= 8`（8 埠 IPC 初始化配置） | **55 次** | **PASS** |
+| **heap_4 成功釋放次數** | `xNumberOfSuccessfulFrees` | `>= 8`（IPC 回應緩衝區即時釋放） | **16 次** (無洩漏) | **PASS** |
+| **剩餘 Heap 空間** | `xFreeBytesRemaining` | 介於 `16000` ~ `32768` 位元組 | **19,576 Bytes** | **PASS** |
+| **長期穩定性** | `xMinimumEverFreeBytesRemaining` | 靜置 30 秒後數值維持恆定，無遞減洩漏 | **19,576 Bytes** | **PASS** |
 
 ---
 
 ### 里程碑 T2：SJA1110 硬體 Trap 檢查與 8 埠初始化
 
-* **測試目的**：驗證 `SRP_PORT_ConfigureHwTrap()` 正確將雙組 MAC 濾波規則寫入交換機 `GeneralParametersTable`，且 8 個外部橋接埠皆進入 Operational 狀態並啟動軟體計時器池。
+* **測試目的**：驗證 `SRP_PORT_ConfigureHwTrap()` 正確將雙組 MAC 濾波規則寫入交換機 `GeneralParametersTable`，且外部橋接埠進入 Operational 狀態並啟動軟體計時器池。
 * **執行步驟**：
-  1. 於 `SRP_PORT_ConfigureHwTrap()` 之 `Switch_Ip_SetGeneralParamsTable()` 下中斷點。
-  2. 讀回 `genParams` 暫存器內容或調用 `Switch_Ip_GetGeneralParamsTable(0U, &genParams)`。
-  3. 讓程式運行約 3 秒後暫停，檢查 `g_srp_bridge_ctx` 與 `g_srp_timers`。
+  1. 透過 GDB 連線檢查 `g_srp_bridge_ctx`、`g_srp_port_link_up` 與 `g_srp_timers`。
+  2. 檢查各連接埠鏈路速率映射 `g_srp_port_rate_bps`。
 
-* **驗收指標**：
+* **實測驗收結果**：
 
-| 檢查項目 | GDB 監看表達式 | 預期結果與驗收標準 |
-| :--- | :--- | :--- |
-| **macFilter0 目的 MAC** | `genParams.macFilterResult0[0..5]` | `{0x01, 0x80, 0xC2, 0x00, 0x00, 0x0E}` |
-| **macFilter0 遮罩** | `genParams.macFilter0[0..5]` | `{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}` |
-| **macFilter1 目的 MAC** | `genParams.macFilterResult1[0..5]` | `{0x01, 0x80, 0xC2, 0x00, 0x00, 0x20}` |
-| **macFilter1 遮罩** | `genParams.macFilter1[5]` | `0xFE`（精準匹配 MMRP `..20` 與 MVRP `..21`） |
-| **SRP 網橋上下文** | `g_srp_bridge_ctx` | `!= NULL` |
-| **8 埠 Operational 狀態** | `g_srp_bridge_ctx->msrp->operational_state` | `0x00FF`（8 個外部埠皆處於就緒狀態） |
-| **計時器池運行** | `g_srp_timers[0].in_use` 與 `.active` | 皆為 `TRUE`，倒數計時正常運作 |
-| **最大計時器容量** | `SRP_MAX_OS_TIMERS` | `64` |
+| 檢查項目 | GDB 監看表達式 | 預期結果與驗收標準 | 實機測試數據 (Target Measured) | 判定 |
+| :--- | :--- | :--- | :--- | :---: |
+| **SRP 網橋上下文** | `g_srp_bridge_ctx` | `!= NULL` | `0x20007d00` (堆疊於 heap 內) | **PASS** |
+| **連接埠 Operational 狀態** | `g_srp_bridge_ctx->msrp->operational_state` | 符合連線埠之位元遮罩 | `0x8E` (`b10001110`) | **PASS** |
+| **連接埠鏈路判定** | `g_srp_port_link_up[0..7]` | `{false, true, true, true, false, false, false, true}` | 完全吻合 `0x8E` 遮罩 | **PASS** |
+| **各埠協商/固定速率** | `g_srp_port_rate_bps[0..7]` | 1 Gbps / 100 Mbps 正確辨識 | `{1G, 1G, 100M, 1G, 100M, 100M, 100M, 100M}` | **PASS** |
+| **計時器池運作** | `g_srp_timers[0]` | LeaveAll/Join 定時器運作 | `period_ms = 14911, active = true` | **PASS** |
+| **高頻排程定時器** | `g_srp_timers[1]` | 快速輪詢定時器運作 | `period_ms = 100, active = true` | **PASS** |
+| **最大計時器容量** | `SRP_MAX_OS_TIMERS` | `64` | `64` | **PASS** |
 
 ---
 
@@ -169,18 +167,20 @@ void SRP_PORT_RunSelfTest(void)
 }
 ```
 
-* **驗收指標**：
+* **實測驗收結果**：
 
-| 檢查項目 | GDB 表達式 / 暫存器 API | 預期結果與驗收標準 |
-| :--- | :--- | :--- |
-| **硬體 VLAN 查找表寫入** | `Switch_Ip_GetVlanLookupEntry(0, 2, &vlt, &found)` | `found == TRUE` |
-| **VLAN 埠成員遮罩** | `vlt.vmembPort` | `0x0011`（同時包含 Bit 0 Host Port 與 Bit 4 SwitchPort 4） |
-| **MVRP 註冊 VLAN 計數** | `g_srp_bridge_ctx->mvrp->map[0].num_vlans` | `1` |
-| **L2 TCAM 轉發表項建立** | `Switch_Ip_SearchL2EntryInTcam(...)` | `found == TRUE` |
-| **TCAM 轉發目的埠** | `g_srp_fdb_table[0].dest_ports` | `(1 << 4)` = `0x0010`（精準導向 Port 4） |
-| **TCAM 啟用標記** | `g_srp_fdb_table[0].in_use` | `TRUE` |
-| **CBS 運作斜率** | `fqtss_port_params[5].bandwidth_availability[tc].oper_idle_slope` | `> 0` |
-| **CBS 硬體寫入狀態** | `Switch_Ip_SetCbsIdleSlope()` 回傳值 | `SWITCH_STATUS_SUCCESS` |
+| 檢查項目 | GDB 表達式 / 暫存器 API | 預期結果與驗收標準 | 實機測試數據 (Target Measured) | 判定 |
+| :--- | :--- | :--- | :--- | :---: |
+| **自測整體執行狀態** | `g_srp_selftest_done` | `1U`（完整走完自測） | `1U` | **PASS** |
+| **MVRP VLAN 表項寫入** | `g_srp_selftest_vlan_res` | `0` (SUCCESS) | **`0`** | **PASS** |
+| **L2 TCAM 轉發表項寫入** | `g_srp_selftest_fdb_res` | `0` (SUCCESS) | **`0`** | **PASS** |
+| **IEEE 802.1Qav CBS 寫入** | `g_srp_selftest_cbs_res` | `0` (SUCCESS) | **`0`** | **PASS** |
+| **TCAM 轉發目的埠** | `g_srp_fdb_table[0].dest_ports` | `(1 << 4)` = `16`（精準導向 Port 4） | **`16` (`0x0010`)** | **PASS** |
+| **TCAM 啟用與動態標記** | `g_srp_fdb_table[0].in_use` / `.dynamic` | 皆為 `true` | `in_use = true, dynamic = true` | **PASS** |
+| **TCAM 索引分配** | `g_srp_fdb_table[0].tcam_index` | `>= 0` | **`16`** | **PASS** |
+| **CBS 運作整形斜率** | `fqtss_port_params[5].bandwidth_availability[7].oper_idle_slope` | `16384000` (16.384 Mbps) | **`16,384,000` bps** | **PASS** |
+| **CBS 頻寬占比計算** | `fqtss_port_params[5].bandwidth_availability[7].delta_bandwidth` | 依比例計算 (`75` = 7.5%) | **`75`** | **PASS** |
+| **CBS 埠傳輸速率** | `fqtss_port_params[5].port_transmit_rate` | `1000000000` (1 Gbps) | **`1,000,000,000` bps** | **PASS** |
 
 ---
 

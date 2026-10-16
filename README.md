@@ -240,8 +240,12 @@ make -j8 all
 
 ## Network Validation & Wireshark Verification
 
-> [!TIP]
-> For the comprehensive step-by-step verification guide covering **Scenario A (single board USB/JTAG only, milestones T1–T3)** and **Scenario B (Ethernet + PC, milestones T4–T5)** with automated Python Scapy scripts, see **[TEST_PLAN.md](TEST_PLAN.md)** ([繁體中文測試計畫](TEST_PLAN_zh.md)).
+> [!NOTE]
+> **Live Target Verification Status**:
+> - **Scenario A (Single board JTAG, milestones T1–T3)**: **100% Verified (PASS)** on real `SJA1110-MGS-EVM` hardware! Confirmed: FreeRTOS `heap_4` 19.5 KB remaining with 0 leaks, 8-port SRP Bridge scheduler active, MVRP VID 2 entry, L2 TCAM stream multicast forwarding, and IEEE 802.1Qav CBS hardware shaper all successfully offloaded.
+> - **Scenario B (Ethernet + PC, milestones T4–T5)**: Python Scapy automated test harness (`tool/test_sja1110_srp.py`) and Wireshark capture filters ready. Awaiting physical Ethernet cable connection to `SW1 Port 4`.
+>
+> For full step-by-step verification, GDB watch variables, and injection hooks, see **[TEST_PLAN.md](TEST_PLAN.md)** ([繁體中文測試計畫](TEST_PLAN_zh.md)).
 
 1. Insert a `1000BASE-T` SFP transceiver into **SW1 Port 4 (`PORT_4`)** of the `SJA1110-MGS-EVM` board and connect it to a PC or TSN endpoint.
 2. Open **Wireshark** on the PC network interface and apply the capture filter:

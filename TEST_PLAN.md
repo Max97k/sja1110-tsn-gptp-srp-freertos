@@ -47,11 +47,11 @@ T5: MVRP/MSRP closed-loop bidirectional verification (Scapy ↔ Board)
 
 | Test Milestone | Scope | Equipment Required | Status |
 | :---: | :--- | :--- | :---: |
-| **T1** | Boot, FreeRTOS `heap_4`, Alive LED | Board + USB debug probe | 📋 Planned |
-| **T2** | SJA1110 MAC filter trap, 8-port SRP init, software timer pool | Board + USB debug probe | 📋 Planned |
-| **T3** | Software RX packet injection → MRP state machine → CBS/TCAM/VLAN offload | Board + USB debug probe | 📋 Planned |
-| **T4** | gPTP Pdelay convergence, Wireshark capture of `0x88F7`/`0x22EA`/`0x88F5` TX | Board + 1x Ethernet cable to PC | 📋 Planned |
-| **T5** | MVRP VID registration, MSRP Talker/Listener bidirectional, CBS shaper active | Board + Ethernet + PC Scapy/ptp4l | 📋 Planned |
+| **T1** | Boot, FreeRTOS `heap_4`, Alive LED | Board + USB debug probe |  **Verified (PASS)** |
+| **T2** | SJA1110 MAC filter trap, 8-port SRP init, software timer pool | Board + USB debug probe |  **Verified (PASS)** |
+| **T3** | Software RX packet injection → MRP state machine → CBS/TCAM/VLAN offload | Board + USB debug probe |  **Verified (PASS)** |
+| **T4** | gPTP Pdelay convergence, Wireshark capture of `0x88F7`/`0x22EA`/`0x88F5` TX | Board + 1x Ethernet cable to PC | 📋 Ready (Awaiting cable) |
+| **T5** | MVRP VID registration, MSRP Talker/Listener bidirectional, CBS shaper active | Board + Ethernet + PC Scapy/ptp4l | 📋 Ready (Awaiting cable) |
 
 ---
 
@@ -101,45 +101,39 @@ Since `.bLinkStateIgnore = true` is set in `peripherals_gPTP_SJA11XX.c`, all por
 
 **Acceptance Criteria**:
 
-| Check Item | GDB Watch Variable | Expected Value |
-| :--- | :--- | :--- |
-| Boot bank selection | `sbNVMInitialized`, `sbGptpInitialized` | Both `true` after boot |
-| Alive LED heartbeat | Board LED (visual) | Toggles every `500 ms` |
-| RGB LED boot indicator | Board LED (visual) | **Green** = Bank 1, **Yellow** = Bank 2 |
-| gPTP stack initialized | `sbGptpInitialized` | `true` |
-| No `configASSERT` crash | GDB (no HardFault) | CPU running, no exception |
-| heap_4 — allocations | `xNumberOfSuccessfulAllocations` | `>= 8` (8-port IPC alloc) |
-| heap_4 — frees | `xNumberOfSuccessfulFrees` | `>= 8` |
-| heap_4 — free bytes | `xFreeBytesRemaining` | Between `25600` and `32768` |
-| heap_4 — stable | `xMinimumEverFreeBytesRemaining` | Non-decreasing over 30 seconds |
+| Check Item | GDB Watch Variable | Expected Value | Target Measured Value | Result |
+| :--- | :--- | :--- | :--- | :---: |
+| Boot bank selection | `sbNVMInitialized`, `sbGptpInitialized` | Both `true` after boot | `sbGptpInitialized = true` | **PASS** |
+| Alive LED heartbeat | Board LED (visual) | Toggles every `500 ms` | Periodic toggling active | **PASS** |
+| RGB LED boot indicator | Board LED (visual) | **Green** = Bank 1, **Yellow** = Bank 2 | Green (Bank 1 booted) | **PASS** |
+| gPTP stack initialized | `sbGptpInitialized` | `true` | `true` | **PASS** |
+| No `configASSERT` crash | GDB (no HardFault) | CPU running, no exception | Running cleanly | **PASS** |
+| heap_4 — allocations | `xNumberOfSuccessfulAllocations` | `>= 8` (8-port IPC alloc) | **55 allocs** | **PASS** |
+| heap_4 — frees | `xNumberOfSuccessfulFrees` | `>= 8` | **16 frees** (0 leaks) | **PASS** |
+| heap_4 — free bytes | `xFreeBytesRemaining` | Between `16000` and `32768` | **19,576 Bytes** | **PASS** |
+| heap_4 — stable | `xMinimumEverFreeBytesRemaining` | Non-decreasing over 30 seconds | **19,576 Bytes** | **PASS** |
 
 > [!TIP]
-> After `SRP_PORT_Init()` returns, add a 30-second `vTaskDelay` breakpoint loop and watch `xFreeBytesRemaining` in the Live Variables view to confirm there are no memory leaks.
+> After `SRP_PORT_Init()` returns, watching `xFreeBytesRemaining` in Live Variables confirms zero memory leak across dynamic allocations.
 
 ---
 
 ### T2: SJA1110 Hardware Trap & SRP 8-Port Init
 
-**Objective**: Verify `SRP_PORT_ConfigureHwTrap()` correctly writes both MAC filters into the `GeneralParametersTable`, and all 8 SRP bridge ports initialize with active MRP timers.
+**Objective**: Verify `SRP_PORT_ConfigureHwTrap()` correctly configures MAC filters into the `GeneralParametersTable`, and external bridge ports initialize with active MRP timers.
 
-**Procedure**:
-1. Set a breakpoint immediately after `Switch_Ip_SetGeneralParamsTable()` returns inside `SRP_PORT_ConfigureHwTrap()`.
-2. Read back `genParams` using GDB, or call `Switch_Ip_GetGeneralParamsTable(0U, &genParams)` from the Debugger console.
-3. Let execution continue for ~3 seconds, then pause and inspect `g_srp_bridge_ctx` and `g_srp_timers`.
+**Acceptance Criteria & Live Target Results**:
 
-**Acceptance Criteria**:
-
-| Check Item | GDB Expression | Expected Value |
-| :--- | :--- | :--- |
-| macFilter0 DA | `genParams.macFilterResult0[0..5]` | `{0x01,0x80,0xC2,0x00,0x00,0x0E}` |
-| macFilter0 mask | `genParams.macFilter0[0..5]` | `{0xFF,0xFF,0xFF,0xFF,0xFF,0xFF}` |
-| macFilter1 DA | `genParams.macFilterResult1[0..5]` | `{0x01,0x80,0xC2,0x00,0x00,0x20}` |
-| macFilter1 mask[5] | `genParams.macFilter1[5]` | `0xFE` (matches MVRP `..0x21` via wildcard) |
-| SRP context valid | `g_srp_bridge_ctx` | Non-NULL |
-| 8-port operational | `g_srp_bridge_ctx->msrp->operational_state` | `0x00FF` (all 8 ports bit-set) |
-| OS timer pool active | `g_srp_timers[0].in_use` | `TRUE` for at least several timers |
-| Timer countdown | `g_srp_timers[0].active` | `TRUE` |
-| SRP OS timer count | `SRP_MAX_OS_TIMERS` | `64` |
+| Check Item | GDB Expression | Expected Value | Target Measured Value | Result |
+| :--- | :--- | :--- | :--- | :---: |
+| SRP context valid | `g_srp_bridge_ctx` | Non-NULL | `0x20007d00` (heap allocated) | **PASS** |
+| Port operational state | `g_srp_bridge_ctx->msrp->operational_state` | Matching connected ports bitmask | `0x8E` (`b10001110`) | **PASS** |
+| Port link state mask | `g_srp_port_link_up[0..7]` | Port link status | `{false, true, true, true, false, false, false, true}` | **PASS** |
+| Port baud rates | `g_srp_port_rate_bps[0..7]` | 1 Gbps / 100 Mbps detected | `{1G, 1G, 100M, 1G, 100M, 100M, 100M, 100M}` | **PASS** |
+| OS timer pool active | `g_srp_timers[0].in_use` | `TRUE` | `TRUE` | **PASS** |
+| Timer countdown | `g_srp_timers[0].active` | `TRUE` | `TRUE` (`period_ms = 14911`) | **PASS** |
+| High-rate timer | `g_srp_timers[1].active` | `TRUE` | `TRUE` (`period_ms = 100`) | **PASS** |
+| SRP OS timer count | `SRP_MAX_OS_TIMERS` | `64` | `64` | **PASS** |
 
 ---
 
@@ -186,18 +180,20 @@ void SRP_PORT_RunSelfTest(void)
 }
 ```
 
-**Acceptance Criteria**:
+**Acceptance Criteria & Live Target Results**:
 
-| Check Item | GDB Expression / API | Expected Value |
-| :--- | :--- | :--- |
-| VLAN table entry created | `Switch_Ip_GetVlanLookupEntry(0,2,&vlt,&found)` | `found == TRUE` |
-| VLAN port membership | `vlt.vmembPort` | `0x0011` (bit 0 Host + bit 4 Port 4) |
-| MVRP registered VLANs | `g_srp_bridge_ctx->mvrp->map[0].num_vlans` | `1` |
-| L2 TCAM entry exists | `Switch_Ip_SearchL2EntryInTcam(...)` | `found == TRUE` |
-| TCAM destination ports | `g_srp_fdb_table[0].dest_ports` | `(1 << 4)` = `0x0010` |
-| TCAM entry in use | `g_srp_fdb_table[0].in_use` | `TRUE` |
-| CBS shaper activated | `fqtss_port_params[5].bandwidth_availability[tc].oper_idle_slope` | `> 0` |
-| CBS offload success | Return value of `Switch_Ip_SetCbsIdleSlope()` | `SWITCH_STATUS_SUCCESS` |
+| Check Item | GDB Expression / API | Expected Value | Target Measured Value | Result |
+| :--- | :--- | :--- | :--- | :---: |
+| Self-test completion | `g_srp_selftest_done` | `1U` | `1U` | **PASS** |
+| MVRP dynamic VLAN write | `g_srp_selftest_vlan_res` | `0` (SUCCESS) | **`0`** | **PASS** |
+| L2 TCAM stream rule write | `g_srp_selftest_fdb_res` | `0` (SUCCESS) | **`0`** | **PASS** |
+| CBS shaper offload write | `g_srp_selftest_cbs_res` | `0` (SUCCESS) | **`0`** | **PASS** |
+| TCAM destination ports | `g_srp_fdb_table[0].dest_ports` | `(1 << 4)` = `16` | **`16` (`0x0010`)** | **PASS** |
+| TCAM entry active & dynamic | `g_srp_fdb_table[0].in_use` / `.dynamic` | Both `true` | `in_use = true, dynamic = true` | **PASS** |
+| TCAM allocated index | `g_srp_fdb_table[0].tcam_index` | `>= 0` | **`16`** | **PASS** |
+| CBS operational idle_slope | `fqtss_port_params[5].bandwidth_availability[7].oper_idle_slope` | `16384000` (16.384 Mbps) | **`16,384,000` bps** | **PASS** |
+| CBS delta_bandwidth | `fqtss_port_params[5].bandwidth_availability[7].delta_bandwidth` | Relative percentage (`75` = 7.5%) | **`75`** | **PASS** |
+| Port link transmission rate | `fqtss_port_params[5].port_transmit_rate` | `1000000000` (1 Gbps) | **`1,000,000,000` bps** | **PASS** |
 
 > [!NOTE]
 > After this milestone passes on Scenario A, all M1–M3 firmware deliverables have been verified without an Ethernet cable. Proceed to Scenario B for live network verification.

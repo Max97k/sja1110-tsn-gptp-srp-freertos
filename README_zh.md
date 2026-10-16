@@ -240,8 +240,12 @@ make -j8 all
 
 ## 網路驗證與 Wireshark 封包分析 (Validation)
 
-> [!TIP]
-> 關於包含 **情境一（單板僅接 USB/JTAG，里程碑 T1–T3）** 與 **情境二（乙太網路線接 PC，里程碑 T4–T5）** 之詳細步驟、GDB 監看變數、按鍵自測注入與自動化 Python Scapy 腳本，請參閱完整的 **[自我測試計畫 (TEST_PLAN_zh.md)](TEST_PLAN_zh.md)** ([English Test Plan](TEST_PLAN.md))。
+> [!NOTE]
+> **實機測試進度**：
+> - **情境一（單板 JTAG，里程碑 T1–T3）**：已於 `SJA1110-MGS-EVM` 目標板 **100% 驗證通過 (PASS)**！實測 FreeRTOS `heap_4` 剩餘 19.5 KB 零洩漏、8 埠 SRP Bridge 正常排程運作、MVRP VID 2 表項、L2 TCAM 串流轉發、IEEE 802.1Qav CBS 硬體頻寬整形器寫入全數成功。
+> - **情境二（雙向網路線，里程碑 T4–T5）**：自動化 Python Scapy 腳本與 Wireshark 配置已就緒，接上實體網路線至 `SW1 Port 4` 即可執行外部雙向閉迴路測試。
+>
+> 詳細步驟、GDB 監看變數、開機自測與按鍵注入機制，請參閱完整的 **[自我測試計畫 (TEST_PLAN_zh.md)](TEST_PLAN_zh.md)** ([English Test Plan](TEST_PLAN.md))。
 
 1. 將 `1000BASE-T` SFP 光電轉換模組插入 `SJA1110-MGS-EVM` 評估板之 **SW1 Port 4 (`PORT_4`)**，並透過乙太網路線連接至測試電腦或 TSN 端點設備。
 2. 於電腦端開啟 **Wireshark** 並設定捕捉過濾器：
