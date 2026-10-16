@@ -8,7 +8,7 @@
 [![Toolchain: GCC 9.2](https://img.shields.io/badge/Toolchain-GCC%209.2%20(arm--none--eabi)-brightgreen.svg)](https://gcc.gnu.org)
 [![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD--3--Clause-blue.svg)](LICENSE)
 
-English | [繁體中文](README_zh.md)
+English | [繁體中文](README_zh.md) | [Test Plan & Verification (T1–T5)](TEST_PLAN.md)
 
 ---
 
@@ -239,6 +239,9 @@ make -j8 all
 ---
 
 ## Network Validation & Wireshark Verification
+
+> [!TIP]
+> For the comprehensive step-by-step verification guide covering **Scenario A (single board USB/JTAG only, milestones T1–T3)** and **Scenario B (Ethernet + PC, milestones T4–T5)** with automated Python Scapy scripts, see **[TEST_PLAN.md](TEST_PLAN.md)** ([繁體中文測試計畫](TEST_PLAN_zh.md)).
 
 1. Insert a `1000BASE-T` SFP transceiver into **SW1 Port 4 (`PORT_4`)** of the `SJA1110-MGS-EVM` board and connect it to a PC or TSN endpoint.
 2. Open **Wireshark** on the PC network interface and apply the capture filter:

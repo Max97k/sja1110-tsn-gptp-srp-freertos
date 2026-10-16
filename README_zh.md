@@ -8,7 +8,7 @@
 [![Toolchain: GCC 9.2](https://img.shields.io/badge/Toolchain-GCC%209.2%20(arm--none--eabi)-brightgreen.svg)](https://gcc.gnu.org)
 [![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD--3--Clause-blue.svg)](LICENSE)
 
-[English](README.md) | 繁體中文
+[English](README.md) | 繁體中文 | [自我測試與驗證計畫 (T1–T5)](TEST_PLAN_zh.md)
 
 ---
 
@@ -239,6 +239,9 @@ make -j8 all
 ---
 
 ## 網路驗證與 Wireshark 封包分析 (Validation)
+
+> [!TIP]
+> 關於包含 **情境一（單板僅接 USB/JTAG，里程碑 T1–T3）** 與 **情境二（乙太網路線接 PC，里程碑 T4–T5）** 之詳細步驟、GDB 監看變數、按鍵自測注入與自動化 Python Scapy 腳本，請參閱完整的 **[自我測試計畫 (TEST_PLAN_zh.md)](TEST_PLAN_zh.md)** ([English Test Plan](TEST_PLAN.md))。
 
 1. 將 `1000BASE-T` SFP 光電轉換模組插入 `SJA1110-MGS-EVM` 評估板之 **SW1 Port 4 (`PORT_4`)**，並透過乙太網路線連接至測試電腦或 TSN 端點設備。
 2. 於電腦端開啟 **Wireshark** 並設定捕捉過濾器：
