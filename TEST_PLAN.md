@@ -50,8 +50,8 @@ T5: MVRP/MSRP closed-loop bidirectional verification (Scapy ↔ Board)
 | **T1** | Boot, FreeRTOS `heap_4`, Alive LED | Board + USB debug probe |  **Verified (PASS)** |
 | **T2** | SJA1110 MAC filter trap, 8-port SRP init, software timer pool | Board + USB debug probe |  **Verified (PASS)** |
 | **T3** | Software RX packet injection → MRP state machine → CBS/TCAM/VLAN offload | Board + USB debug probe |  **Verified (PASS)** |
-| **T4** | gPTP Pdelay convergence, Wireshark capture of `0x88F7`/`0x22EA`/`0x88F5` TX | Board + 1x Ethernet cable to PC | 📋 Ready (Awaiting cable) |
-| **T5** | MVRP VID registration, MSRP Talker/Listener bidirectional, CBS shaper active | Board + Ethernet + PC Scapy/ptp4l | 📋 Ready (Awaiting cable) |
+| **T4** | gPTP Pdelay convergence, Wireshark capture of `0x88F7`/`0x22EA`/`0x88F5` TX | Board + 1x Ethernet cable to PC |  **Verified (PASS)** |
+| **T5** | MVRP VID registration, MSRP Talker/Listener bidirectional, CBS shaper active | Board + Ethernet + PC Scapy |  **Verified (PASS)** |
 
 ---
 

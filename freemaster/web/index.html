@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SJA1110 TSN & gPTP FreeRTOS - 即時監控與 Wireshark 整合儀表板</title>
+  <style>
+    :root {
+      --bg-dark: #0b0f19;
+      --card-bg: #131b2e;
+      --card-border: #1e2c4c;
+      --card-hover: #19233c;
+      --text-main: #f0f4fc;
+      --text-muted: #8899b7;
+      --accent-green: #00e676;
+      --accent-cyan: #00e5ff;
+      --accent-purple: #b388ff;
+      --accent-amber: #ffd700;
+      --accent-red: #ff5252;
+      --ws-gptp: rgba(0, 230, 118, 0.12);
+      --ws-gptp-text: #00e676;
+      --ws-pdelay: rgba(0, 229, 255, 0.12);
+      --ws-pdelay-text: #00e5ff;
+      --ws-msrp: rgba(179, 136, 255, 0.12);
+      --ws-msrp-text: #b388ff;
+      --ws-mvrp: rgba(255, 171, 0, 0.12);
+      --ws-mvrp-text: #ffab00;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+    body { background: var(--bg-dark); color: var(--text-main); height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+
+    /* Top Navigation Header */
+    header {
+      background: #0e1526;
+      border-bottom: 1px solid var(--card-border);
+      padding: 10px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-logo { width: 34px; height: 34px; background: linear-gradient(135deg, #00e5ff, #0070ba); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 900; color: #fff; font-size: 16px; box-shadow: 0 0 12px rgba(0,229,255,0.4); }
+    .brand-title h1 { font-size: 16px; font-weight: 700; color: #fff; letter-spacing: 0.5px; }
+    .brand-title p { font-size: 11px; color: var(--text-muted); }
+
+    .header-pills { display: flex; gap: 8px; align-items: center; }
+    .pill { background: #162038; border: 1px solid var(--card-border); padding: 5px 12px; border-radius: 20px; font-size: 11px; display: flex; align-items: center; gap: 6px; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-green); box-shadow: 0 0 8px var(--accent-green); }
+    .status-dot.blink { animation: pulse 1s infinite alternate; }
+    @keyframes pulse { from { opacity: 0.4; } to { opacity: 1; } }
+
+    /* Main Grid Layout */
+    .dashboard-container {
+      display: grid;
+      grid-template-columns: 460px 1fr;
+      flex: 1;
+      height: calc(100vh - 55px);
+      overflow: hidden;
+    }
+
+    /* Left Panel: FreeMASTER Telemetry */
+    .telemetry-pane {
+      background: #0f1629;
+      border-right: 1px solid var(--card-border);
+      padding: 14px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    }
+    .card-title {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .card-title .badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+    .badge-pass { background: rgba(0, 230, 118, 0.15); color: var(--accent-green); border: 1px solid rgba(0, 230, 118, 0.3); }
+
+    .metric-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .metric-box { background: #0c1222; padding: 8px 10px; border-radius: 6px; border: 1px solid #1a2540; }
+    .metric-label { font-size: 10px; color: var(--text-muted); margin-bottom: 2px; }
+    .metric-value { font-size: 15px; font-weight: 700; color: #fff; }
+    .metric-value.green { color: var(--accent-green); }
+    .metric-value.cyan { color: var(--accent-cyan); }
+    .metric-value.purple { color: var(--accent-purple); }
+
+    /* Switch 8-Port Grid */
+    .port-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 4px; }
+    .port-node {
+      background: #0b1120;
+      border: 1px solid #1c2742;
+      border-radius: 6px;
+      padding: 6px 4px;
+      text-align: center;
+      transition: all 0.2s;
+    }
+    .port-node.active { border-color: var(--accent-green); background: rgba(0, 230, 118, 0.05); }
+    .port-node.active-1g { border-color: var(--accent-cyan); background: rgba(0, 229, 255, 0.08); box-shadow: 0 0 10px rgba(0,229,255,0.2); }
+    .port-name { font-size: 11px; font-weight: 700; }
+    .port-speed { font-size: 9px; color: var(--text-muted); }
+    .port-led { width: 6px; height: 6px; border-radius: 50%; margin: 3px auto 0; background: #445; }
+    .port-node.active .port-led { background: var(--accent-green); box-shadow: 0 0 6px var(--accent-green); }
+    .port-node.active-1g .port-led { background: var(--accent-cyan); box-shadow: 0 0 6px var(--accent-cyan); }
+
+    /* Offload List */
+    .offload-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 0;
+      border-bottom: 1px solid #18233c;
+      font-size: 11px;
+    }
+    .offload-item:last-child { border-bottom: none; }
+    .offload-val { font-family: monospace; font-size: 11px; color: var(--accent-cyan); font-weight: 600; }
+
+    /* Interactive Buttons */
+    .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .btn {
+      background: #192542;
+      border: 1px solid var(--card-border);
+      color: #fff;
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+    .btn:hover { background: #223258; border-color: var(--accent-cyan); transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    .btn-primary { background: linear-gradient(135deg, #0070ba, #0099ff); border: none; }
+    .btn-primary:hover { background: linear-gradient(135deg, #0088e0, #1ab0ff); box-shadow: 0 0 10px rgba(0,153,255,0.4); }
+
+    /* Right Panel: Wireshark Packet Analyzer */
+    .packet-pane {
+      background: #090d16;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    /* Packet Filter / Control Header */
+    .packet-toolbar {
+      background: #111828;
+      border-bottom: 1px solid var(--card-border);
+      padding: 8px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .filter-tabs { display: flex; gap: 6px; align-items: center; }
+    .filter-tab {
+      background: #18233a;
+      border: 1px solid var(--card-border);
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+      color: var(--text-muted);
+      transition: 0.15s;
+    }
+    .filter-tab.active, .filter-tab:hover { background: #223150; color: #fff; border-color: var(--accent-cyan); }
+    .filter-count { font-weight: 700; margin-left: 4px; padding: 1px 5px; border-radius: 10px; background: #0c1220; font-size: 10px; }
+
+    /* Wireshark Packet Table */
+    .table-container {
+      flex: 1;
+      overflow-y: auto;
+      font-family: "Cascadia Code", Consolas, "Courier New", monospace;
+      font-size: 11px;
+    }
+    table { width: 100%; border-collapse: collapse; text-align: left; }
+    thead { position: sticky; top: 0; background: #131c30; z-index: 2; box-shadow: 0 2px 6px rgba(0,0,0,0.4); }
+    th { padding: 7px 10px; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--card-border); font-size: 11px; }
+    td { padding: 4px 10px; border-bottom: 1px solid rgba(255,255,255,0.03); white-space: nowrap; }
+    tr:hover { filter: brightness(1.25); cursor: pointer; }
+    tr.selected { outline: 1px solid var(--accent-cyan); background: rgba(0, 229, 255, 0.15) !important; }
+
+    /* Packet Row Protocol Color Themes */
+    tr.gptp-sync { background: var(--ws-gptp); color: var(--ws-gptp-text); }
+    tr.gptp-fup { background: var(--ws-gptp); color: #81c784; }
+    tr.gptp-pdelay { background: var(--ws-pdelay); color: var(--ws-pdelay-text); }
+    tr.msrp { background: var(--ws-msrp); color: var(--ws-msrp-text); }
+    tr.mvrp { background: var(--ws-mvrp); color: var(--ws-mvrp-text); }
+    tr.leak { background: rgba(255, 82, 82, 0.2); color: #ff5252; font-weight: bold; }
+
+    /* Bottom Inspector Drawer */
+    .inspector-drawer {
+      height: 220px;
+      background: #0c1220;
+      border-top: 1px solid var(--card-border);
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      flex-shrink: 0;
+    }
+    .inspector-pane {
+      padding: 10px 14px;
+      overflow-y: auto;
+      font-family: "Cascadia Code", Consolas, monospace;
+      font-size: 11px;
+    }
+    .inspector-pane:first-child { border-right: 1px solid var(--card-border); }
+    .inspector-title { font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; }
+    .field-row { display: flex; justify-content: space-between; padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.03); }
+    .field-key { color: var(--text-muted); }
+    .field-val { color: var(--accent-cyan); font-weight: 600; }
+    pre.hex-dump { line-height: 1.4; color: #b0c4de; margin: 0; }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navigation Header -->
+  <header>
+    <div class="brand">
+      <div class="brand-logo">TSN</div>
+      <div class="brand-title">
+        <h1>NXP SJA1110 TSN & gPTP FreeRTOS Dashboard</h1>
+        <p>即時車用乙太網交換機遙測與 Wireshark 協定分析整合展示系統</p>
+      </div>
+    </div>
+    <div class="header-pills">
+      <div class="pill">
+        <div class="status-dot blink"></div>
+        <span>鏈路：SW1 Port 4 (1Gbps SFP)</span>
+      </div>
+      <div class="pill">
+        <span style="color:var(--accent-green);font-weight:700;">IEEE 802.1AS Pdelay: LOCKED</span>
+      </div>
+      <div class="pill">
+        <span id="uptime-display">運行時間: 00:00:00</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Split Dashboard -->
+  <div class="dashboard-container">
+
+    <!-- Left Column: MCU & TSN Switch Telemetry -->
+    <div class="telemetry-pane">
+
+      <!-- gPTP Status Card -->
+      <div class="card">
+        <div class="card-title">
+          <span>IEEE 802.1AS gPTP 時鐘引擎</span>
+          <span class="badge badge-pass">INITIALIZED</span>
+        </div>
+        <div class="metric-grid">
+          <div class="metric-box">
+            <div class="metric-label">Sync 週期</div>
+            <div class="metric-value green">125 ms (8 Hz)</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-label">Pdelay 延遲</div>
+            <div class="metric-value cyan" id="pdelay-val">&lt; 150 ns</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-label">Master MAC</div>
+            <div class="metric-value" style="font-size:11px;">22:33:44:55:66:77</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-label">0x8B8C 洩漏檢查</div>
+            <div class="metric-value green" id="leak-val">0 (PASS)</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- FreeRTOS Heap Memory Card -->
+      <div class="card">
+        <div class="card-title">
+          <span>FreeRTOS Heap 記憶體水線 (heap_4)</span>
+          <span class="badge badge-pass">LEAK-FREE</span>
+        </div>
+        <div class="metric-grid">
+          <div class="metric-box">
+            <div class="metric-label">剩餘可用空間</div>
+            <div class="metric-value green" id="heap-free">19,576 B</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-label">歷史最低水線</div>
+            <div class="metric-value green" id="heap-min">19,576 B</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SJA1110 8-Port Switch Matrix -->
+      <div class="card">
+        <div class="card-title">
+          <span>SJA1110 8-Port 交換矩陣狀態</span>
+          <span style="font-size:10px;color:var(--text-muted);">雙濾波 Trap 生效</span>
+        </div>
+        <div class="port-grid">
+          <div class="port-node active"><div class="port-name">Port 1</div><div class="port-speed">100M MII</div><div class="port-led"></div></div>
+          <div class="port-node active"><div class="port-name">Port 2</div><div class="port-speed">100M MII</div><div class="port-led"></div></div>
+          <div class="port-node active"><div class="port-name">Port 3</div><div class="port-speed">100M MII</div><div class="port-led"></div></div>
+          <div class="port-node active-1g"><div class="port-name">Port 4</div><div class="port-speed">1G SFP (PC)</div><div class="port-led"></div></div>
+          <div class="port-node"><div class="port-name">Port 5</div><div class="port-speed">100BASE-T1</div><div class="port-led"></div></div>
+          <div class="port-node"><div class="port-name">Port 6</div><div class="port-speed">100BASE-T1</div><div class="port-led"></div></div>
+          <div class="port-node"><div class="port-name">Port 7</div><div class="port-speed">100BASE-T1</div><div class="port-led"></div></div>
+          <div class="port-node active"><div class="port-name">Port 8</div><div class="port-speed">100M MII</div><div class="port-led"></div></div>
+        </div>
+      </div>
+
+      <!-- Hardware Offload Rules -->
+      <div class="card">
+        <div class="card-title">
+          <span>IEEE 802.1Q TSN 硬體卸載表項</span>
+          <span class="badge badge-pass">ACTIVE</span>
+        </div>
+        <div class="offload-item">
+          <span>MVRP 動態 VLAN 查找表</span>
+          <span class="offload-val" id="offload-vlan">VID = 2 (已寫入)</span>
+        </div>
+        <div class="offload-item">
+          <span>L2 TCAM 串流轉發表 (FDB)</span>
+          <span class="offload-val" id="offload-tcam">91:E0:F0:... -> Port 4</span>
+        </div>
+        <div class="offload-item">
+          <span>IEEE 802.1Qav CBS 整形器</span>
+          <span class="offload-val" id="offload-cbs">16.384 Mbps (Port 4)</span>
+        </div>
+      </div>
+
+      <!-- Interactive Injection Controls -->
+      <div class="card">
+        <div class="card-title">
+          <span>即時互動控制與封包注入</span>
+        </div>
+        <div class="btn-grid">
+          <button class="btn btn-primary" onclick="triggerSelfTest()">🚀 觸發內部自測</button>
+          <button class="btn" onclick="injectMvrp()">📡 注入 MVRP VID=2</button>
+          <button class="btn" onclick="injectTalker()">🎵 注入 MSRP Talker</button>
+          <button class="btn" onclick="injectListener()">🔒 注入 Listener Ready</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Right Column: Live Wireshark Packet Analyzer -->
+    <div class="packet-pane">
+
+      <!-- Toolbar & Protocol Counters -->
+      <div class="packet-toolbar">
+        <div class="filter-tabs">
+          <div class="filter-tab active" onclick="setFilter('all')">全部 <span class="filter-count" id="count-all">0</span></div>
+          <div class="filter-tab" onclick="setFilter('gptp-sync')">gPTP Sync <span class="filter-count" id="count-sync">0</span></div>
+          <div class="filter-tab" onclick="setFilter('gptp-pdelay')">gPTP Pdelay <span class="filter-count" id="count-pdelay">0</span></div>
+          <div class="filter-tab" onclick="setFilter('msrp')">MSRP <span class="filter-count" id="count-msrp">0</span></div>
+          <div class="filter-tab" onclick="setFilter('mvrp')">MVRP <span class="filter-count" id="count-mvrp">0</span></div>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <label style="font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:4px;">
+            <input type="checkbox" id="autoscroll-chk" checked> 自動滾動
+          </label>
+          <button class="btn" style="padding:4px 8px;font-size:10px;" onclick="clearPackets()">🧹 清空列表</button>
+        </div>
+      </div>
+
+      <!-- Live Packet Table -->
+      <div class="table-container" id="table-scroll">
+        <table id="packet-table">
+          <thead>
+            <tr>
+              <th style="width: 50px;">No.</th>
+              <th style="width: 75px;">Time (s)</th>
+              <th style="width: 140px;">Protocol</th>
+              <th style="width: 130px;">Source MAC</th>
+              <th style="width: 130px;">Destination MAC</th>
+              <th style="width: 55px;">Len</th>
+              <th>Info</th>
+            </tr>
+          </thead>
+          <tbody id="packet-tbody">
+            <!-- Dynamic rows will be inserted here -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Bottom Inspector Drawer -->
+      <div class="inspector-drawer">
+        <div class="inspector-pane">
+          <div class="inspector-title">📦 協定欄位解碼 (Protocol Decoded)</div>
+          <div id="inspector-fields">
+            <div style="color:var(--text-muted);font-style:italic;">點擊上方任一封包以檢視詳細欄位解碼</div>
+          </div>
+        </div>
+        <div class="inspector-pane">
+          <div class="inspector-title">📄 封包 Hex Dump 與 ASCII 檢視</div>
+          <pre class="hex-dump" id="inspector-hex">-- 請選取封包 --</pre>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <script>
+    let packets = [];
+    let activeFilter = 'all';
+    let selectedPacket = null;
+    let ws = null;
+
+    function initWebSocket() {
+      const wsUrl = `ws://${window.location.hostname || '127.0.0.1'}:8091/ws`;
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        console.log("WebSocket connected to telemetry bridge");
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'packet') {
+            addPacket(msg.data);
+          } else if (msg.type === 'stats') {
+            updateStats(msg.data);
+          } else if (msg.type === 'init') {
+            updateStats(msg.stats);
+            if (msg.history) {
+              msg.history.forEach(addPacket);
+            }
+          }
+        } catch(e) {
+          console.error("WS Parse error", e);
+        }
+      };
+
+      ws.onclose = () => {
+        setTimeout(initWebSocket, 2000);
+      };
+    }
+
+    function addPacket(pkt) {
+      packets.push(pkt);
+      if (packets.length > 500) packets.shift();
+
+      // Update badge counts
+      document.getElementById('count-all').innerText = packets.length;
+      document.getElementById('count-sync').innerText = packets.filter(p => p.tag === 'gptp-sync').length;
+      document.getElementById('count-pdelay').innerText = packets.filter(p => p.tag === 'gptp-pdelay').length;
+      document.getElementById('count-msrp').innerText = packets.filter(p => p.tag === 'msrp').length;
+      document.getElementById('count-mvrp').innerText = packets.filter(p => p.tag === 'mvrp').length;
+
+      // Filter check
+      if (activeFilter !== 'all' && pkt.tag !== activeFilter) {
+        return;
+      }
+
+      renderPacketRow(pkt);
+    }
+
+    function renderPacketRow(pkt) {
+      const tbody = document.getElementById('packet-tbody');
+      const tr = document.createElement('tr');
+      tr.className = pkt.tag;
+      tr.id = `pkt-${pkt.no}`;
+      tr.onclick = () => selectPacket(pkt);
+
+      tr.innerHTML = `
+        <td>${pkt.no}</td>
+        <td>${pkt.time}</td>
+        <td><strong>${pkt.protocol}</strong></td>
+        <td>${pkt.src}</td>
+        <td>${pkt.dst}</td>
+        <td>${pkt.len}</td>
+        <td>${pkt.info}</td>
+      `;
+
+      tbody.appendChild(tr);
+
+      if (document.getElementById('autoscroll-chk').checked) {
+        const scrollDiv = document.getElementById('table-scroll');
+        scrollDiv.scrollTop = scrollDiv.scrollHeight;
+      }
+    }
+
+    function selectPacket(pkt) {
+      document.querySelectorAll('#packet-tbody tr').forEach(r => r.classList.remove('selected'));
+      const row = document.getElementById(`pkt-${pkt.no}`);
+      if (row) row.classList.add('selected');
+
+      const fieldsContainer = document.getElementById('inspector-fields');
+      let fieldsHtml = '';
+      if (pkt.fields && Object.keys(pkt.fields).length > 0) {
+        for (const [k, v] of Object.entries(pkt.fields)) {
+          fieldsHtml += `<div class="field-row"><span class="field-key">${k}</span><span class="field-val">${v}</span></div>`;
+        }
+      } else {
+        fieldsHtml = `<div>${pkt.info}</div>`;
+      }
+      fieldsContainer.innerHTML = fieldsHtml;
+
+      document.getElementById('inspector-hex').innerText = pkt.hex_dump || '-- 無 Hex 資料 --';
+    }
+
+    function setFilter(filter) {
+      activeFilter = filter;
+      document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+      event.target.closest('.filter-tab').classList.add('active');
+
+      const tbody = document.getElementById('packet-tbody');
+      tbody.innerHTML = '';
+      packets.forEach(pkt => {
+        if (filter === 'all' || pkt.tag === filter) {
+          renderPacketRow(pkt);
+        }
+      });
+    }
+
+    function clearPackets() {
+      packets = [];
+      document.getElementById('packet-tbody').innerHTML = '';
+      document.getElementById('count-all').innerText = '0';
+      document.getElementById('count-sync').innerText = '0';
+      document.getElementById('count-pdelay').innerText = '0';
+      document.getElementById('count-msrp').innerText = '0';
+      document.getElementById('count-mvrp').innerText = '0';
+    }
+
+    function updateStats(s) {
+      if (!s) return;
+      if (s.uptime_sec !== undefined) {
+        const hrs = Math.floor(s.uptime_sec / 3600).toString().padStart(2, '0');
+        const mins = Math.floor((s.uptime_sec % 3600) / 60).toString().padStart(2, '0');
+        const secs = (s.uptime_sec % 60).toString().padStart(2, '0');
+        document.getElementById('uptime-display').innerText = `運行時間: ${hrs}:${mins}:${secs}`;
+      }
+      if (s.leak_8b8c !== undefined) {
+        const el = document.getElementById('leak-val');
+        el.innerText = `${s.leak_8b8c} (${s.leak_8b8c === 0 ? 'PASS' : 'LEAK!'})`;
+        el.className = s.leak_8b8c === 0 ? 'metric-value green' : 'metric-value red';
+      }
+      if (s.free_heap_bytes) document.getElementById('heap-free').innerText = `${s.free_heap_bytes.toLocaleString()} B`;
+      if (s.min_free_heap_bytes) document.getElementById('heap-min').innerText = `${s.min_free_heap_bytes.toLocaleString()} B`;
+      if (s.vlan_offload) document.getElementById('offload-vlan').innerText = s.vlan_offload;
+      if (s.tcam_offload) document.getElementById('offload-tcam').innerText = s.tcam_offload;
+      if (s.cbs_slope_bps) document.getElementById('offload-cbs').innerText = `${(s.cbs_slope_bps / 1e6).toFixed(3)} Mbps (Port 4)`;
+    }
+
+    // API Trigger helpers
+    function triggerSelfTest() {
+      fetch('/api/selftest', { method: 'POST' }).catch(err => console.error(err));
+    }
+    function injectMvrp() {
+      fetch('/api/inject_mvrp', { method: 'POST' }).catch(err => console.error(err));
+    }
+    function injectTalker() {
+      fetch('/api/inject_talker', { method: 'POST' }).catch(err => console.error(err));
+    }
+    function injectListener() {
+      fetch('/api/inject_listener', { method: 'POST' }).catch(err => console.error(err));
+    }
+
+    window.onload = initWebSocket;
+  </script>
+</body>
+</html>

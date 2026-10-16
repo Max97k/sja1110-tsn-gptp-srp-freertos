@@ -6,32 +6,53 @@ Bidirectional Test Script
 Connection: SJA1110 SW1 Port 4 (1G SFP) <-> PC Ethernet Interface
 
 Usage:
-    pip install scapy
-    python tool/test_sja1110_srp.py --iface eth0 --mac 00:11:22:33:44:55
+    python tool/test_sja1110_srp.py [--iface Ethernet] [--mac a0:ad:9f:2d:fe:84]
 
-Stages:
-  1. Listen 3 s for board TX frames (gPTP, MSRP, MVRP) - T4 verification
-  2. Send MVRP JoinIn (VID=2)                           - T5-A
-  3. Send MSRP Talker Advertise                         - T5-B
-  4. Send MSRP Listener Ready                           - T5-C
-  5. Listen 5 s for board state machine responses       - T5-B/C
+Milestones verified:
+  T4:   125ms gPTP Sync/Follow_Up, Pdelay_Req, Pdelay Responder (Resp + Follow_Up)
+  T5-A: MVRP JoinIn (VID = 2) Injection & State Machine Response
+  T5-B: MSRP Talker Advertise Injection & Propagation
+  T5-C: MSRP Listener Ready & Reservation Loop Closure
 """
 import argparse
 import struct
+import sys
+import threading
 import time
-from scapy.all import Ether, Raw, sendp, sniff
+from scapy.all import Ether, Raw, sendp, sniff, conf
 
 # ---------------------------------------------------------------------------
-# CLI Arguments
+# CLI Arguments & Auto-detection
 # ---------------------------------------------------------------------------
-parser = argparse.ArgumentParser(description="SJA1110 TSN SRP/gPTP test tool")
-parser.add_argument("--iface", default="eth0",
-                    help="Network interface connected to SJA1110 Port 4 (default: eth0)")
-parser.add_argument("--mac", default="00:11:22:33:44:55",
-                    help="Source MAC of this PC NIC (default: 00:11:22:33:44:55)")
+def detect_default_iface():
+    for iface in conf.ifaces.values():
+        if "Realtek" in iface.description or "Ethernet" in iface.name:
+            return iface.name, iface.mac
+    return "Ethernet", "a0:ad:9f:2d:fe:84"
+
+default_iface, default_mac = detect_default_iface()
+
+parser = argparse.ArgumentParser(description="SJA1110 TSN SRP/gPTP bidirectional test tool")
+parser.add_argument("--iface", default=default_iface,
+                    help=f"Network interface connected to SJA1110 Port 4 (default: {default_iface})")
+parser.add_argument("--mac", default=default_mac,
+                    help=f"Source MAC of PC NIC (default: {default_mac})")
 args = parser.parse_args()
 IFACE  = args.iface
 PC_MAC = args.mac
+PC_CLOCK_ID = bytes.fromhex(PC_MAC.replace(":", "")[:6] + "fffe" + PC_MAC.replace(":", "")[6:])
+
+ETHERTYPE_NAMES = {0x88F7: "gPTP", 0x22EA: "MSRP", 0x88F5: "MVRP", 0x88F6: "MMRP"}
+stats = {
+    "gptp_sync": 0,
+    "gptp_fup": 0,
+    "gptp_pdelay_req": 0,
+    "gptp_pdelay_resp_sent": 0,
+    "msrp_rx": 0,
+    "mvrp_rx": 0,
+    "other_rx": 0,
+    "header_leak_8b8c": 0
+}
 
 # ---------------------------------------------------------------------------
 # Frame builders
@@ -88,8 +109,6 @@ def build_msrp_talker_advertise(
 def build_msrp_listener_ready(stream_id_hex: str = "0011223344550001") -> Ether:
     """IEEE 802.1Qat MSRP Listener Ready PDU."""
     stream_id = bytes.fromhex(stream_id_hex)
-    # Attribute Type 3 = Listener, Attribute Length = 8 (StreamID only)
-    # FourPackedEvent: Ready = 2 => packed value for 1 entry = 2 * 64 = 128 (0x80)
     attr_list_len = 2 + 8 + 1 + 1 + 2
     pdu = (struct.pack("!BBBHH",
                        0x00, 0x03, 8, attr_list_len, 0x0001) +
@@ -98,52 +117,136 @@ def build_msrp_listener_ready(stream_id_hex: str = "0011223344550001") -> Ether:
     return Ether(dst="01:80:c2:00:00:0e", src=PC_MAC, type=0x22EA) / Raw(load=pdu)
 
 
+def respond_pdelay_req(raw: bytes, src_mac: str) -> None:
+    """Respond to SJA1110 gPTP Pdelay_Req with Pdelay_Resp and Pdelay_Resp_Follow_Up."""
+    if len(raw) < 34:
+        return
+    seq = int.from_bytes(raw[30:32], "big")
+    req_port_id = raw[20:30]  # sourcePortIdentity of initiator
+
+    now = time.time()
+    t2_sec = int(now)
+    t2_nsec = int((now - t2_sec) * 1e9)
+    t3_sec = t2_sec
+    t3_nsec = (t2_nsec + 35000) % 1000000000
+
+    # Pdelay_Resp (Type 3, length 54)
+    resp_hdr = struct.pack("!BBHBBHQIH10sHBB",
+        0x13, 0x02, 54, 0x00, 0x00, 0x0208, 0, 0, 0,
+        PC_CLOCK_ID[:8] + b"\x00\x01", seq, 0x05, 0x7F
+    )
+    t2_bytes = struct.pack("!Q", t2_sec)[2:] + struct.pack("!I", t2_nsec)
+    resp_payload = resp_hdr + t2_bytes + req_port_id
+    resp_pkt = Ether(dst="01:80:c2:00:00:0e", src=PC_MAC, type=0x88F7) / Raw(load=resp_payload)
+    sendp(resp_pkt, iface=IFACE, verbose=False)
+
+    # Pdelay_Resp_Follow_Up (Type 10, length 54)
+    fup_hdr = struct.pack("!BBHBBHQIH10sHBB",
+        0x1A, 0x02, 54, 0x00, 0x00, 0x0008, 0, 0, 0,
+        PC_CLOCK_ID[:8] + b"\x00\x01", seq, 0x05, 0x7F
+    )
+    t3_bytes = struct.pack("!Q", t3_sec)[2:] + struct.pack("!I", t3_nsec)
+    fup_payload = fup_hdr + t3_bytes + req_port_id
+    fup_pkt = Ether(dst="01:80:c2:00:00:0e", src=PC_MAC, type=0x88F7) / Raw(load=fup_payload)
+    sendp(fup_pkt, iface=IFACE, verbose=False)
+
+    stats["gptp_pdelay_resp_sent"] += 1
+    print(f"  [gPTP Responder] <-- Pdelay_Req(seq={seq})  --> Sent Pdelay_Resp + Follow_Up")
+
+
 # ---------------------------------------------------------------------------
 # Packet handler
 # ---------------------------------------------------------------------------
-ETHERTYPE_NAMES = {0x88F7: "gPTP", 0x22EA: "MSRP", 0x88F5: "MVRP", 0x88F6: "MMRP"}
-
 def packet_handler(pkt) -> None:
     if Ether not in pkt:
         return
     et  = pkt[Ether].type
     src = pkt[Ether].src
-    name = ETHERTYPE_NAMES.get(et, f"0x{et:04X}")
-    raw_hex = bytes(pkt[Raw]).hex()[:48] + "..." if Raw in pkt else ""
-    print(f"[RX {name:4s}] src={src}  len={len(pkt):4d}  {raw_hex}")
+    dst = pkt[Ether].dst
 
+    # Ignore our own outbound injected packets
+    if src.lower() == PC_MAC.lower():
+        return
 
-BPF_TSN = "ether proto 0x88f7 or ether proto 0x22ea or ether proto 0x88f5 or ether proto 0x88f6"
+    if et == 0x8B8C:
+        stats["header_leak_8b8c"] += 1
+        print(f"  [!] ALERT: SJA1110 0x8B8C header leaked to wire! len={len(pkt)}")
+        return
+
+    if et == 0x88F7:
+        raw = bytes(pkt[Raw]) if Raw in pkt else b""
+        msg_type = (raw[0] & 0x0F) if len(raw) > 0 else 0xFF
+        seq = int.from_bytes(raw[30:32], "big") if len(raw) >= 32 else 0
+
+        if msg_type == 0:  # Sync
+            stats["gptp_sync"] += 1
+            if stats["gptp_sync"] % 8 == 1:
+                print(f"  [RX gPTP Sync] seq={seq:5d}  src={src}  dst={dst} (125ms interval)")
+        elif msg_type == 8:  # Follow_Up
+            stats["gptp_fup"] += 1
+        elif msg_type == 2:  # Pdelay_Req
+            stats["gptp_pdelay_req"] += 1
+            respond_pdelay_req(raw, src)
+
+    elif et == 0x22EA:
+        stats["msrp_rx"] += 1
+        raw = bytes(pkt[Raw]) if Raw in pkt else b""
+        attr_t = raw[1] if len(raw) > 1 else 0
+        attr_desc = {1: "TalkerAdv", 2: "TalkerFailed/LeaveAll", 3: "Listener", 4: "Domain"}.get(attr_t, f"Type{attr_t}")
+        print(f"  [RX MSRP PDU] attr={attr_desc}  src={src}  dst={dst}  len={len(pkt)}")
+
+    elif et == 0x88F5:
+        stats["mvrp_rx"] += 1
+        print(f"  [RX MVRP PDU] src={src}  dst={dst}  len={len(pkt)}")
+    else:
+        stats["other_rx"] += 1
+
 
 # ---------------------------------------------------------------------------
-# Main test sequence
+# Main test flow
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    print(f"\n{'='*60}")
-    print(f"  SJA1110-MGS-EVM TSN Self-Test  |  iface={IFACE}  src={PC_MAC}")
-    print(f"{'='*60}\n")
+    print(f"\n{'='*72}")
+    print(f"  SJA1110-MGS-EVM TSN Closed-Loop Bidirectional Verification")
+    print(f"  Interface: {IFACE}  |  PC MAC: {PC_MAC}")
+    print(f"{'='*72}\n")
 
-    # Stage 1 - T4: Capture board TX frames
-    print("Stage 1 [T4] Listening for board TX frames (3 s) ...")
-    sniff(iface=IFACE, prn=packet_handler, timeout=3, filter=BPF_TSN)
+    # Stage 1: T4 Validation & Active gPTP Pdelay Locking (4 seconds)
+    print("=== Stage 1: [T4] gPTP Sync Verification & Active Pdelay Locking (4 s) ===")
+    sniff(iface=IFACE, prn=packet_handler, timeout=4,
+          filter="ether proto 0x88f7 or ether proto 0x22ea or ether proto 0x88f5 or ether proto 0x8b8c")
 
-    # Stage 2 - T5-A: Inject MVRP JoinIn (VID = 2)
-    print("\nStage 2 [T5-A] Sending MVRP JoinIn (VID=2) ...")
+    # Stage 2: T5-A MVRP Injection (VID = 2)
+    print("\n=== Stage 2: [T5-A] Injecting MVRP JoinIn (VID=2) ===")
     sendp(build_mvrp_join_vid2(), iface=IFACE, verbose=False)
+    print("  [TX MVRP] JoinIn VID=2 sent to 01:80:C2:00:00:21")
 
-    # Stage 3 - T5-B: Inject MSRP Talker Advertise
-    print("Stage 3 [T5-B] Sending MSRP Talker Advertise (StreamID=0011223344550001) ...")
+    # Stage 3: T5-B MSRP Talker Advertise Injection
+    print("\n=== Stage 3: [T5-B] Injecting MSRP Talker Advertise (StreamID=0011223344550001) ===")
     sendp(build_msrp_talker_advertise(), iface=IFACE, verbose=False)
+    print("  [TX MSRP] Talker Advertise (StreamID=0011223344550001, VID=2, Priority 3) sent")
 
-    # Stage 4 - Wait for board MRP timer period, then send Listener Ready
-    print("Stage 4 [T5-C] Waiting 1 s for board to propagate Talker Advertise ...")
-    time.sleep(1.0)
-    print("         Sending MSRP Listener Ready (closes the loop) ...")
+    # Stage 4: T5-C MSRP Listener Ready Injection
+    print("\n=== Stage 4: [T5-C] Injecting MSRP Listener Ready (StreamID=0011223344550001) ===")
+    time.sleep(0.5)
     sendp(build_msrp_listener_ready(), iface=IFACE, verbose=False)
+    print("  [TX MSRP] Listener Ready (StreamID=0011223344550001) sent")
 
-    # Stage 5 - Capture board state machine responses
-    print("\nStage 5 [T5-B/C] Listening for board MRP state machine responses (5 s) ...")
-    sniff(iface=IFACE, prn=packet_handler, timeout=5,
-          filter="ether proto 0x22ea or ether proto 0x88f5")
+    # Stage 5: Observe MRP Convergence & Pdelay exchanges (6 seconds)
+    print("\n=== Stage 5: [T4/T5] Observing MRP State Machine Convergence & Pdelay (6 s) ===")
+    sniff(iface=IFACE, prn=packet_handler, timeout=6,
+          filter="ether proto 0x88f7 or ether proto 0x22ea or ether proto 0x88f5 or ether proto 0x8b8c")
 
-    print("\n[+] Test script complete. Verify CBS + TCAM activation via GDB.\n")
+    # ---------------------------------------------------------------------------
+    # Report & Scorecard
+    # ---------------------------------------------------------------------------
+    print(f"\n{'='*72}")
+    print(f"                      TEST RESULTS SUMMARY (T4 & T5)")
+    print(f"{'='*72}")
+    print(f"  [T4] gPTP Sync Frames Captured:         {stats['gptp_sync']:4d}  ({'PASS' if stats['gptp_sync'] >= 20 else 'FAIL'})")
+    print(f"  [T4] gPTP Follow_Up Frames Captured:    {stats['gptp_fup']:4d}  ({'PASS' if stats['gptp_fup'] >= 20 else 'FAIL'})")
+    print(f"  [T4] gPTP Pdelay_Req Captured:          {stats['gptp_pdelay_req']:4d}  ({'PASS' if stats['gptp_pdelay_req'] >= 1 else 'FAIL'})")
+    print(f"  [T4] gPTP Pdelay_Resp/Fup Sent (PC):    {stats['gptp_pdelay_resp_sent']:4d}  ({'PASS' if stats['gptp_pdelay_resp_sent'] >= 1 else 'FAIL'})")
+    print(f"  [T4] SJA1110 0x8B8C Header Leakage:     {stats['header_leak_8b8c']:4d}  ({'PASS' if stats['header_leak_8b8c'] == 0 else 'FAIL'})")
+    print(f"  [T5] MSRP Frames Captured from EVB:     {stats['msrp_rx']:4d}  ({'PASS' if stats['msrp_rx'] >= 1 else 'WARN'})")
+    print(f"{'='*72}\n")

@@ -1,0 +1,50 @@
+{
+  "port": 8090,
+  "web_root": "web",
+  "open_path": "/index.html",
+  "connections": [],
+  "variables": [
+    {
+      "name": "sbGptpInitialized",
+      "addr": 536956365,
+      "type": "uint",
+      "size": 1
+    },
+    {
+      "name": "xFreeBytesRemaining",
+      "addr": 536902908,
+      "type": "uint",
+      "size": 4
+    },
+    {
+      "name": "g_srp_selftest_done",
+      "addr": 536964944,
+      "type": "uint",
+      "size": 1
+    },
+    {
+      "name": "g_srp_selftest_vlan_res",
+      "addr": 536901836,
+      "type": "int",
+      "size": 4
+    },
+    {
+      "name": "g_srp_selftest_fdb_res",
+      "addr": 536901840,
+      "type": "int",
+      "size": 4
+    },
+    {
+      "name": "g_srp_selftest_cbs_res",
+      "addr": 536901844,
+      "type": "int",
+      "size": 4
+    },
+    {
+      "name": "g_srp_run_selftest",
+      "addr": 536964945,
+      "type": "uint",
+      "size": 1
+    }
+  ]
+}

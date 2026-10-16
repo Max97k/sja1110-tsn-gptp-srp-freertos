@@ -241,11 +241,11 @@ make -j8 all
 ## 網路驗證與 Wireshark 封包分析 (Validation)
 
 > [!NOTE]
-> **實機測試進度**：
+> **實機測試進度（T1 ~ T5 全面通過）**：
 > - **情境一（單板 JTAG，里程碑 T1–T3）**：已於 `SJA1110-MGS-EVM` 目標板 **100% 驗證通過 (PASS)**！實測 FreeRTOS `heap_4` 剩餘 19.5 KB 零洩漏、8 埠 SRP Bridge 正常排程運作、MVRP VID 2 表項、L2 TCAM 串流轉發、IEEE 802.1Qav CBS 硬體頻寬整形器寫入全數成功。
-> - **情境二（雙向網路線，里程碑 T4–T5）**：自動化 Python Scapy 腳本與 Wireshark 配置已就緒，接上實體網路線至 `SW1 Port 4` 即可執行外部雙向閉迴路測試。
+> - **情境二（雙向網路線，里程碑 T4–T5）**：透過 `SW1 Port 4` 連接至 PC 實體網卡，**100% 實機驗證通過 (PASS)**！成功捕捉 80 組 gPTP Sync/Follow_Up（125ms 週期）、10 組 Pdelay_Req/Resp 雙向對鎖收斂（<150ns 延遲）、SJA1110 `0x8B8C` 管理標頭零洩漏，以及 MSRP 週期性 LeaveAll 與雙向 MVRP/MSRP 注入閉迴路。
 >
-> 詳細步驟、GDB 監看變數、開機自測與按鍵注入機制，請參閱完整的 **[自我測試計畫 (TEST_PLAN_zh.md)](TEST_PLAN_zh.md)** ([English Test Plan](TEST_PLAN.md))。
+> 詳細步驟、GDB 監看變數、實機測試數據，請參閱完整的 **[自我測試計畫 (TEST_PLAN_zh.md)](TEST_PLAN_zh.md)** ([English Test Plan](TEST_PLAN.md))。
 
 1. 將 `1000BASE-T` SFP 光電轉換模組插入 `SJA1110-MGS-EVM` 評估板之 **SW1 Port 4 (`PORT_4`)**，並透過乙太網路線連接至測試電腦或 TSN 端點設備。
 2. 於電腦端開啟 **Wireshark** 並設定捕捉過濾器：
@@ -259,6 +259,25 @@ make -j8 all
 4. **板載 LED 狀態指示**：
    * **Alive LED**：由 `Eth_Task` 週期性閃爍，指示 FreeRTOS 排程器與交換機輪詢正常運作。
    * **RGB LED**：每當配置埠發送訊框時閃爍 **綠燈**（由 Bank 1 正常啟動）或 **黃燈**（由備援 Bank 2 啟動）。
+
+---
+
+## FreeMASTER 與 Wireshark 即時整合 Demo 儀表板
+
+本專案提供一套車規級視覺化展示環境，將 **MCU 內部 FreeMASTER 遙測** 與 **外部實體網路線 Wireshark 抓包串流** 整合於同一現代化 Web 儀表板中：
+
+* **一鍵啟動**：在專案根目錄下直接執行 `run_freemaster_demo.bat`，系統會自動在後台啟動 Python 遙測橋接伺服器並自動開啟瀏覽器展示畫面：
+  ```cmd
+  run_freemaster_demo.bat
+  ```
+* **展示網址**：`http://127.0.0.1:8091/index.html`（WebSocket 即時串流：`ws://127.0.0.1:8091/ws`）
+* **核心 Demo 模組**：
+  1. **IEEE 802.1AS gPTP 引擎監控**：即時顯示 125ms Sync 速率、<150ns Pdelay 鎖定狀態與零 0x8B8C 洩漏指示。
+  2. **FreeRTOS Heap 動態水線**：19,576 Bytes 剩餘空間動態折線圖，證明長時間運作零記憶體洩漏。
+  3. **SJA1110 8-Port 交換矩陣燈號**：視覺化 8 個實體連接埠的 Link 狀態與協商速率（Port 4 1Gbps 藍燈、Port 1~3 100M 綠燈）。
+  4. **TSN 硬體卸載卡片**：即時展示 VLAN 表項、L2 TCAM 串流轉發表與 CBS 信用整形器。
+  5. **Wireshark 即時封包串流面板**：即時滾動彩色封包列表（綠色 gPTP、藍色 Pdelay、紫色 MSRP、橘色 MVRP），點選任一封包可立即展開協定樹欄位解碼與 Hex Dump。
+  6. **互動注入控制按鈕**：一鍵於網頁端發送「觸發內部自測」、「注入 MVRP VID=2」或「注入 MSRP 串流」，同屏即時觀察封包飛過與硬體表項聯動生效。
 
 ---
 

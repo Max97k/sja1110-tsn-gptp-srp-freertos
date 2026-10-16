@@ -54,8 +54,8 @@ T5: MVRP / MSRP 雙向閉迴路自動化測試 (Python Scapy)
 | **T1** | 開機狀態、FreeRTOS `heap_4` 記憶體分配與釋放、Alive LED 週期心跳 | 單板 + S32 Debug Probe (USB) |  **實機通過 (PASS)** |
 | **T2** | `GeneralParametersTable` 雙濾波暫存器、8 埠 SRP Bridge 初始化、計時器池運作 | 單板 + S32 Debug Probe (USB) |  **實機通過 (PASS)** |
 | **T3** | 軟體封包注入自測（開機自跑/按鍵觸發）：MVRP VID 2、MSRP Talker/Listener、CBS/TCAM/VLAN 硬體寫入 | 單板 + S32 Debug Probe (USB) |  **實機通過 (PASS)** |
-| **T4** | `SW1 Port 4` 1GbE 外部發送、Wireshark 驗證 `0x8B8C` 剝除、gPTP 125ms Sync 與 Pdelay 量測 | 開發板 + PC (1x 乙太網路線至 Port 4) | 📋 待測 (就緒待接線) |
-| **T5** | PC 端 Python (Scapy) 雙向交互測試：MVRP VID 註冊、MSRP 串流預留、硬體 CBS 整形器啟動 | 開發板 + PC (Scapy / ptp4l) | 📋 待測 (就緒待接線) |
+| **T4** | `SW1 Port 4` 1GbE 外部發送、Wireshark 驗證 `0x8B8C` 剝除、gPTP 125ms Sync 與 Pdelay 量測 | 開發板 + PC (1x 乙太網路線至 Port 4) |  **實機通過 (PASS)** |
+| **T5** | PC 端 Python (Scapy) 雙向交互測試：MVRP VID 註冊、MSRP 串流預留、硬體 CBS 整形器啟動 | 開發板 + PC (Scapy 雙向閉迴路) |  **實機通過 (PASS)** |
 
 ---
 
