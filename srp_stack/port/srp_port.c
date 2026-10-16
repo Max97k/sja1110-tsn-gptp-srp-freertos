@@ -54,7 +54,8 @@
 
 #define SRP_RX_QUEUE_DEPTH              (32U)
 #define SRP_IPC_QUEUE_DEPTH             (16U)
-#define SRP_MAX_OS_TIMERS               (32U)
+#define SRP_MAX_OS_TIMERS               (64U)
+#define SRP_TX_CONFIRM_MAX_RETRIES      (1000U)
 #define SRP_MAX_FDB_ENTRIES             (32U)
 #define SRP_TCAM_BASE_INDEX             (16U)
 #define SRP_ETH_HEAD_TRAIL_LEN          (8U)
@@ -99,6 +100,8 @@ typedef struct {
 /*==================================================================================================
  *                                      LOCAL VARIABLES
  *==================================================================================================*/
+
+extern volatile uint32 EthIf_TxConfirmations[10];
 
 static struct srp_ctx *g_srp_bridge_ctx = NULL;
 static struct srp_config g_srp_bridge_cfg;
@@ -164,10 +167,16 @@ static int srp_logical_to_swt_port(unsigned int logical_port, uint8 *swt_port)
 static void srp_query_swt_port_link(uint8 swt_port, boolean *up, uint64_t *rate_bps)
 {
     Switch_Ip_SJA1110_macCfgTableEntryType macCfg;
+    EthTrcv_LinkStateType linkState = ETHTRCV_LINK_STATE_ACTIVE;
     uint32_t portStatusReg = 0U;
 
     *up = TRUE;
     *rate_bps = 100000000ULL; /* Default 100 Mbps */
+
+    if ((Std_ReturnType)E_OK == EthSwt_43_SJA11XX_GetLinkState(SRP_SJA1110_SWT_ID, swt_port, &linkState))
+    {
+        *up = (ETHTRCV_LINK_STATE_DOWN == linkState) ? FALSE : TRUE;
+    }
 
     /* SJA1110 Port 1, 2, 4 are 1 Gbps capable; Ports 3, 5..8 are 100 Mbps */
     if ((swt_port == 1U) || (swt_port == 2U) || (swt_port == 4U))
@@ -220,6 +229,15 @@ static Std_ReturnType SRP_PORT_ConfigureHwTrap(void)
         return E_NOT_OK;
     }
 
+    /* Configure macFilter0 to trap 01:80:C2:00:00:0E (IEEE 802.1Qat MSRP 0x22EA & IEEE 802.1AS gPTP 0x88F7) */
+    for (idx = 0U; idx < 6U; idx++)
+    {
+        genParams.macFilter0[idx]       = 0xFFU;
+        genParams.macFilterResult0[idx] = g_msrp_mc_mac[idx];
+    }
+    genParams.sendFollowUpTs0     = FALSE;
+
+    /* Configure macFilter1 to trap 01:80:C2:00:00:20 (MMRP) & 01:80:C2:00:00:21 (MVRP) */
     for (idx = 0U; idx < 5U; idx++)
     {
         genParams.macFilter1[idx]       = 0xFFU;
@@ -936,8 +954,17 @@ int net_tx(struct net_tx *tx, struct net_tx_desc *desc)
         return -1;
     }
 
-    /* Immediately confirm and release the single TX buffer descriptor (BufferCount = 1U) */
-    Eth_TxConfirmation(EthConf_EthCtrlConfig_EthCtrlConfig_0);
+    /* Poll Eth_TxConfirmation with bounded retries to ensure the single TX BD (ringSize = 1U) is released */
+    {
+        uint32_t tx_retry = 0U;
+        uint32_t prev_conf = EthIf_TxConfirmations[EthConf_EthCtrlConfig_EthCtrlConfig_0];
+        do
+        {
+            Eth_TxConfirmation(EthConf_EthCtrlConfig_EthCtrlConfig_0);
+            tx_retry++;
+        } while ((EthIf_TxConfirmations[EthConf_EthCtrlConfig_EthCtrlConfig_0] == prev_conf) &&
+                 (tx_retry < SRP_TX_CONFIRM_MAX_RETRIES));
+    }
 
     /* Free descriptor on successful transmission (GenAVB net_tx contract) */
     net_tx_free(desc);
@@ -1210,30 +1237,30 @@ int vlan_update(uint16_t vid, bool dynamic, struct genavb_vlan_port_map *map)
 {
     Switch_Ip_SJA1110_vlanLookupTableEntryType vltEntry;
     boolean found = FALSE;
+    uint8 swt_port = 0U;
     uint16_t port_mask = (1U << SRP_SJA1110_HOST_PORT); /* Always preserve Host Port 0 */
-    unsigned int i;
     Switch_Ip_StatusType status;
     (void)dynamic;
 
-    if (map == NULL)
+    if ((map == NULL) || (srp_logical_to_swt_port(map->port_id, &swt_port) < 0))
     {
         return -1;
     }
 
     os_memset(&vltEntry, 0, sizeof(vltEntry));
-    (void)Switch_Ip_GetVlanLookupEntry(SRP_SJA1110_SWT_ID, vid, &vltEntry, &found);
-
-    for (i = 0U; i < SRP_SJA1110_NUM_BR_PORTS; i++)
+    if ((SWITCH_STATUS_SUCCESS == Switch_Ip_GetVlanLookupEntry(SRP_SJA1110_SWT_ID, vid, &vltEntry, &found)) && found)
     {
-        uint8 swt_port = 0U;
-        if (srp_logical_to_swt_port(map[i].port_id, &swt_port) == 0)
-        {
-            if ((map[i].control == GENAVB_VLAN_ADMIN_CONTROL_REGISTERED) ||
-                (map[i].control == GENAVB_VLAN_ADMIN_CONTROL_FIXED))
-            {
-                port_mask |= (uint16_t)(1U << swt_port);
-            }
-        }
+        port_mask |= vltEntry.vmembPort;
+    }
+
+    if ((map->control == GENAVB_VLAN_ADMIN_CONTROL_REGISTERED) ||
+        (map->control == GENAVB_VLAN_ADMIN_CONTROL_FIXED))
+    {
+        port_mask |= (uint16_t)(1U << swt_port);
+    }
+    else
+    {
+        port_mask &= (uint16_t)~(1U << swt_port);
     }
 
     vltEntry.vlanid    = vid;

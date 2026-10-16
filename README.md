@@ -2,7 +2,7 @@
 
 [![Target: NXP SJA1110](https://img.shields.io/badge/Target-NXP%20SJA1110%20(Silicon%20E)-005a9c.svg)](https://www.nxp.com/products/interfaces/ethernet-/automotive-ethernet-switches/sja1110-multi-gig-safe-and-secure-tsn-ethernet-switch-with-integrated-100base-t1-phys:SJA1110)
 [![Core: Arm Cortex-M7](https://img.shields.io/badge/Core-Arm%C2%AE%20Cortex%C2%AE--M7%20%40%20200MHz-blue.svg)](https://www.arm.com/products/silicon-ip-cpu/cortex-m/cortex-m7)
-[![RTOS: FreeRTOS 10.2](https://img.shields.io/badge/RTOS-FreeRTOS%2010.2.0-brightgreen.svg)](https://www.freertos.org)
+[![RTOS: FreeRTOS 11.1](https://img.shields.io/badge/RTOS-FreeRTOS%2011.1.0-brightgreen.svg)](https://www.freertos.org)
 [![RTD: 0.9.0 (AUTOSAR 4.4)](https://img.shields.io/badge/RTD-0.9.0%20(AUTOSAR%C2%AE%204.4)-orange.svg)](https://www.nxp.com)
 [![TSN: IEEE 802.1AS + 802.1Qat + 802.1Qav](https://img.shields.io/badge/TSN-802.1AS%20gPTP%20%7C%20802.1Qat%20SRP%20%7C%20802.1Qav%20CBS-purple.svg)](https://1.ieee802.org/tsn/)
 [![Toolchain: GCC 9.2](https://img.shields.io/badge/Toolchain-GCC%209.2%20(arm--none--eabi)-brightgreen.svg)](https://gcc.gnu.org)
@@ -24,7 +24,7 @@ This project integrates the **NXP IEEE 802.1AS gPTP Precision Time Synchronizati
 * **Complete MRP State Machine Suite (IEEE 802.1Q-2018 Clause 10 & 35)**:
   * **MSRP (`0x22EA`)**: Multiple Stream Registration Protocol supporting Talker Advertise, Talker Failed, Listener Ready / Asking Failed / Ready Failed declaration merging, latency accumulation, and per-port SR Class A & Class B bandwidth reservation.
   * **MVRP (`0x88F5`)**: Multiple VLAN Registration Protocol dynamically propagating and registering SR VLAN memberships across all 8 external bridge ports.
-  * **MMRP (`0x88F6`)**: Multiple MAC Registration Protocol handling dynamic multicast MAC registration and service declarations.
+  * **MMRP (`0x88F6`)**: Multiple MAC Registration Protocol hardware ingress trapping (`macFilter1`) and L2 frame demultiplexing hooks (state machine stubbed; dynamic stream multicast pruning is driven directly by MSRP Listener Ready via `fdb_update`).
   * **MRP Applicant / Registrar / LeaveAll Timers**: Full IEEE 802.1Q state tables (`VO`, `VP`, `VN`, `AN`, `AA`, `QA`, `LA`, `AO`, `QO`, `AP`, `QP`, `LO` and `IN`, `LV`, `MT`) driven by a deterministic FreeRTOS software timer pool (`os_timer`).
 * **SJA1110 Hardware Management Frame (`0x8B8C`) Trap & Directed TX Pipeline**:
   * **Ingress Trapping**: Uses SJA1110 `GeneralParametersTable` dual MAC filters (`macFilter0` = `01:80:C2:00:00:0E` for gPTP/MSRP; `macFilter1` = `01:80:C2:00:00:20` with mask `FF:FF:FF:FF:FF:FE` for MMRP `01:80:C2:00:00:20` and MVRP `01:80:C2:00:00:21`) to trap link-local control frames to internal Host Port 0 with ingress `SwitchPortIdx` metadata.
@@ -98,12 +98,11 @@ The SJA1110 integrates 1 internal Microcontroller Host Port (`Port 0`) and 8 ext
         │                 │ EtherType 0x88F7            │ EtherType 0x22EA / 0x88F5 / 0x88F6       │
         │                 ▼                             ▼                  │                       │
         │  ┌──────────────────────────┐   ┌─────────────────────────────┐  │                       │
-        │  │   gPTP_Task (Prio 4)     │   │      SRP_Task (Prio 2)      │  │                       │
+        │  │ gPTPTask (Prio 3, 2ms)   │   │ SRP_PORT_Periodic()         │  │                       │
         │  │ • IEEE 802.1AS GM/Bridge │   │ • MSRP Stream Reservation   ├──┘                       │
-        │  │ • Pdelay / Sync / Follow │   │ • MVRP Dynamic VLAN Reg     │                          │
-        │  │ • Hardware Timestamping  │   │ • MMRP MAC Service Reg      │                          │
-        │  └──────────────────────────┘   │ • FQTSS Bandwidth Manager   │                          │
-        │                                 └─────────────────────────────┘                          │
+        │  │ • Eth_Main & Eth_Poll    ├──►│ • MVRP Dynamic VLAN Reg     │                          │
+        │  │ • Hardware Timestamping  │   │ • FQTSS Bandwidth Manager   │                          │
+        │  └──────────────────────────┘   └─────────────────────────────┘                          │
         └──────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -111,10 +110,10 @@ The SJA1110 integrates 1 internal Microcontroller Host Port (`Port 0`) and 8 ext
 
 | Protocol | IEEE Standard | EtherType | Destination Multicast MAC | SJA1110 Trap Filter | FreeRTOS Consumer |
 | :--- | :--- | :---: | :---: | :--- | :--- |
-| **gPTP** | IEEE 802.1AS-2020 | `0x88F7` | `01:80:C2:00:00:0E` | `macFilter0` (`sendFollowUpTs0 = TRUE`) | `gPTP_Task` (Direct callback) |
-| **MSRP** | IEEE 802.1Qat / 802.1Q-2018 Cl. 35 | `0x22EA` | `01:80:C2:00:00:0E` | `macFilter0` (Shared with gPTP) | `SRP_Task` (`g_srp_rx_queue`) |
-| **MVRP** | IEEE 802.1Q-2018 Cl. 11 | `0x88F5` | `01:80:C2:00:00:21` | `macFilter1` (`Mask: FF:FF:FF:FF:FF:FE`) | `SRP_Task` (`g_srp_rx_queue`) |
-| **MMRP** | IEEE 802.1Q-2018 Cl. 10 | `0x88F6` | `01:80:C2:00:00:20` | `macFilter1` (`Res : 01:80:C2:00:00:20`) | `SRP_Task` (`g_srp_rx_queue`) |
+| **gPTP** | IEEE 802.1AS-2020 | `0x88F7` | `01:80:C2:00:00:0E` | `DPI Entry #0/#1` + `macFilter0` | `gPTPTask` (`GPTP_PORT_RxIndication`) |
+| **MSRP** | IEEE 802.1Qat / 802.1Q-2018 Cl. 35 | `0x22EA` | `01:80:C2:00:00:0E` | `macFilter0` (Shared with gPTP) | `gPTPTask` (`g_srp_rx_ring` -> `SRP_PORT_Periodic`) |
+| **MVRP** | IEEE 802.1Q-2018 Cl. 11 | `0x88F5` | `01:80:C2:00:00:21` | `macFilter1` (`Mask: FF:FF:FF:FF:FF:FE`) | `gPTPTask` (`g_srp_rx_ring` -> `SRP_PORT_Periodic`) |
+| **MMRP** | IEEE 802.1Q-2018 Cl. 10 | `0x88F6` | `01:80:C2:00:00:20` | `macFilter1` (`Res : 01:80:C2:00:00:20`) | `gPTPTask` (`g_srp_rx_ring` -> `SRP_PORT_Periodic`) |
 
 ---
 
@@ -133,16 +132,16 @@ This project follows a structured 5-Milestone engineering roadmap tracked via Gi
 ### Detailed Milestone Specifications & Acceptance Criteria
 
 #### Milestone 1: SRP Stack Core & FreeRTOS OSAL Foundation (`v1.0.0-m1`)
-- **GenAVB/TSN Core Extraction**: Ported complete IEEE 802.1Qat / 802.1Q-2018 Clause 10, 11, 34, 35 state machines (`mrp.c`, `msrp.c`, `mvrp.c`, `mmrp.c`, `srp.c`, `srp_entry.c`, `fqtss.c`, `timer.c`, `sr_class.c`, `qos.c`, `managed_objects.c`, `random.c`).
+- **GenAVB/TSN Core Extraction**: Ported complete IEEE 802.1Qat / 802.1Q-2018 Clause 10, 11, 34, 35 state machines (`mrp.c`, `msrp.c`, `mvrp.c`, `mmrp.c`, `srp.c`, `srp_entry.h`, `fqtss.c`, `timer.c`, `sr_class.c`, `qos.c`, `managed_objects.c`, `random.c`).
 - **8-Port SJA1110 Bridge Topology**: Configured `CFG_MAX_NUM_PORT = 8`, `CFG_BR_DEFAULT_NUM_PORTS = 8`, `CFG_BR_LOGICAL_PORT_LIST = {2, 3, 4, 5, 6, 7, 8, 9}` mapping 1-to-1 to SJA1110 physical `SwitchPortIdx 1..8`, with `CFG_TRAFFIC_CLASS_MAX = 8` and `CFG_SR_CLASS_MAX = 2` (Class A & Class B).
-- **FreeRTOS OSAL Adaptation**: Implemented `os_malloc`/`os_free` (`pvPortMalloc`/`vPortFree`), monotonic millisecond/nanosecond clocks (`xTaskGetTickCount`), and FreeRTOS software timer pool (`xTimerCreate`/`xTimerChangePeriod`).
+- **FreeRTOS OSAL Adaptation**: Implemented `os_malloc`/`os_free` (`pvPortMalloc`/`vPortFree`), monotonic millisecond/nanosecond clocks (`xTaskGetTickCount`), and tick-driven deterministic software timer pool (`g_srp_timers` with `SRP_MAX_OS_TIMERS = 64`) and FreeRTOS `heap_4` coalescing memory allocator.
 - **Extensible Bridge-First Architecture**: Enabled Bridge mode (`is_bridge = 1`) as primary target while preserving Endpoint (`msrp_ep` / `mvrp_ep`) and IPC stub hooks for Milestone 5.
 
 #### Milestone 2: SJA1110 Management Frame (`0x8B8C`) & L2 Trap Pipeline (`v1.0.1-m2`)
 - **Dual Hardware MAC Filter Trapping**:
   - `macFilter0` (`01:80:C2:00:00:0E`, mask `FF:FF:FF:FF:FF:FF`): Traps IEEE 802.1AS gPTP (`0x88F7`) and IEEE 802.1Qat MSRP (`0x22EA`) frames to internal Host Port 0.
   - `macFilter1` (`01:80:C2:00:00:20`, mask `FF:FF:FF:FF:FF:FE`, `sendFollowUpTs1 = FALSE`): Simultaneously traps IEEE 802.1Q MMRP (`01:80:C2:00:00:20`, `0x88F6`) and MVRP (`01:80:C2:00:00:21`, `0x88F5`) frames to Host Port 0 with ingress `SwitchPortIdx` metadata.
-- **Zero-Interference RX Demultiplexing**: Extends `EthIf_RxIndication()` to dispatch `0x88F7` directly to `GPTP_MsgReceive()` while queueing `0x22EA` / `0x88F5` / `0x88F6` into `g_srp_rx_queue` with `logical_port = SwitchPortIdx + 1`.
+- **Zero-Interference RX Demultiplexing**: Extends `EthIf_RxIndication()` to dispatch `0x88F7` directly to `GPTP_MsgReceive()` while queueing `0x22EA` / `0x88F5` / `0x88F6` into `g_srp_rx_ring` with `logical_port = SwitchPortIdx + 1`.
 - **Directed Per-Port Egress TX (`0x8B8C`)**: Implements `net_tx()` via `Eth_ProvideTxBuffer` $\to$ `EthSwt_43_SJA11XX_SetMgmtInfo` $\to$ `EthSwt_43_SJA11XX_EthTxProcessFrame` $\to$ `Eth_Transmit` $\to$ `Eth_TxConfirmation` to guarantee deterministic single-descriptor buffer release.
 
 #### Milestone 3: Hardware Offload Integration (CBS Shaper, L2 TCAM FDB & VLAN Table) (`v1.0.2-m3`)
@@ -151,11 +150,11 @@ This project follows a structured 5-Milestone engineering roadmap tracked via Gi
 - **4096-VID Hardware VLAN Lookup Table**: Connects `vlan_update()` / `vlan_delete()` to `Switch_Ip_GetVlanLookupEntry()` and `Switch_Ip_UpdateVlanLookupEntry()`, maintaining `Switch_Ip_Port0` (Host CPU) membership alongside dynamic external bridge ports.
 
 #### Milestone 4: FreeRTOS Dual-Stack Coexistence, Build & Target Validation (`v1.0.3-m4`)
-- **Deterministic Multi-Task Scheduling**:
-  - `gPTP_Task` (`tskIDLE_PRIORITY + 4`): Hard real-time 802.1AS Sync/Follow-Up & Pdelay state machine.
-  - `Eth_Task` (`tskIDLE_PRIORITY + 3`): 1 ms Ethernet RX/TX polling (`Eth_RxIrqCallback`) & link state monitoring.
-  - `SRP_Task` (`tskIDLE_PRIORITY + 2`): Event-driven MRP PDU processing, `os_timer` expiration handling, and hardware table offload.
-- **RTOS Resource Allocation**: Expands `configTOTAL_HEAP_SIZE` to `49152` (48 KB) and enables `configUSE_TIMERS = 1` in `FreeRTOSConfig.h`.
+- **Deterministic Cooperative Task Scheduling**:
+  - `gPTPTask` (`Priority 3`, 2 ms period, `2048` words stack): Cooperative execution of `GPTP_TimerPeriodic()`, `Eth_Main()`, `Eth_Poll()`, `SRP_PORT_Periodic()`, and `FLASH_Write_Poll()`, eliminating lock contention on the single ENET TX buffer descriptor and `Switch_Ip` SPI/APB bus.
+  - `gpioHandleTask` (`Priority 2`, 20 ms period): Polls SJA1110 PHY, SFP, PMIC, and button GPIO interrupts.
+  - `aliveLEDTimer` (`Priority 3`, 500 ms FreeRTOS software timer, `512` words timer task stack): Periodically toggles the onboard Alive LED.
+- **RTOS Resource Allocation**: Expands `configTOTAL_HEAP_SIZE` to `49152` (48 KB) using the FreeRTOS `heap_4` coalescing allocator and enables `configUSE_TIMERS = 1` in `FreeRTOSConfig.h`.
 - **Target & Wireshark Verification**: Clean GCC compilation (`0 errors`), Dual-Bank SPI NVM image generation, and live packet capture verification on `SW1 Port 4` (1G SFP).
 
 #### Milestone 5: TSN Endpoint Mode (`is_bridge = 0`) & Local IPC Extension (`v1.1.0-m5`)
@@ -168,19 +167,20 @@ This project follows a structured 5-Milestone engineering roadmap tracked via Gi
 ```
 .
 ├── board/                              # SJA1110 hardware pin, switch, and peripheral init configs
-├── FreeRTOS/                           # FreeRTOS v10.2.0 kernel & Cortex-M7 portable layer
+├── FreeRTOS/                           # FreeRTOS v11.1.0 kernel, heap_4 allocator & Cortex-M7 port
 ├── generate/                           # S32 Configuration Tools (MEX) generated RTD headers/sources
 │   └── include/FreeRTOSConfig.h        # FreeRTOS scheduler, heap (48 KB), and software timer config
 ├── gptp_stack/                         # IEEE 802.1AS gPTP Precision Time Synchronization Stack
 │   ├── gptp_core/                      # gPTP state machines (Pdelay, Sync, FollowUp, BMCA)
 │   └── port/gptp_port.c                # SJA1110 Eth/EthSwt frame TX/RX & hardware clock port
-├── include/                            # Application-level headers (EthIf.h, callbacks.h)
+├── include/                            # Application-level headers (example_init.h, gptp_cbk.h)
 ├── Project_Settings/                   # Linker scripts (Flash/RAM), startup code, debugger configs
-├── RTD/                                # NXP Real Time Drivers (Eth, EthSwt, Switch_Ip,Spi, Gpt)
+├── RTD/                                # NXP Real Time Drivers (Eth, EthSwt, Switch_Ip, Spi, Gpt)
 ├── src/                                # Main application & integration sources
-│   ├── main.c                          # Dual-bank init, FreeRTOS task creation (gPTP, Eth, SRP)
+│   ├── main.c                          # Dual-bank init, NVM cache, FreeRTOS tasks (gPTPTask, gpioHandleTask)
 │   ├── EthIf.c                         # 0x8B8C Switch Mgmt frame demux (gPTP + MSRP/MVRP/MMRP)
-│   └── callbacks.c                     # Switch port link state, button, and LED callbacks
+│   ├── example_init.c                  # SJA1110 switch/PHY initialization, IRQ handlers & RGB LED control
+│   └── gptp_cbk.c                      # gPTP domain selection, sync & clock update callbacks
 ├── srp_stack/                          # IEEE 802.1Qat Stream Reservation Protocol (SRP) Stack
 │   ├── common/                         # FQTSS bandwidth shaper, timer pool, SR class & QoS descriptors
 │   │   ├── fqtss.c                     # Credit-Based Shaper (CBS) bandwidth accumulation & offload hook

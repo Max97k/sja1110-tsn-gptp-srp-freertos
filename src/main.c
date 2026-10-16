@@ -46,9 +46,11 @@ extern "C" {
 #define NVM_SIZE                     (NVM_SECTOR_SIZE * NVM_NUMBER_OF_SECTORS)
 
 #define gPTPTask_TASK_PRIORITY       (3U)
-#define gpioHandleTask_TASK_PRIORITY (3U)
+#define gpioHandleTask_TASK_PRIORITY (2U)
+#define gPTPTask_STACK_SIZE          (2048U)
 
 #define gPTPTask_SLEEP_TIME          (2U)
+#define gpioHandleTask_SLEEP_TIME    (20U)
 #define ALIVE_LED_TIMER_PERIOD        500U
 
 #define BOOT_LOGGING_ADDRESS         0x2003FFF8
@@ -440,6 +442,8 @@ static void gpioHandleTask(void *pvParameters)
             /* Clear all interrupt flags */
             Switch_Ip_Write(SJA1110_SWT_ID, 1U, (GPIO_REG_IRQ_ADDR), &gpioFlags);
         }
+
+        vTaskDelay(pdMS_TO_TICKS(gpioHandleTask_SLEEP_TIME));
     }
 }
 
@@ -487,7 +491,7 @@ int main(void)
 
     if (sbGptpInitialized)
     {
-        xTaskCreate(gPTPTask, "gPTPTask", configMINIMAL_STACK_SIZE, NULL, gPTPTask_TASK_PRIORITY, &gPTPTaskTaskHandle);
+        xTaskCreate(gPTPTask, "gPTPTask", gPTPTask_STACK_SIZE, NULL, gPTPTask_TASK_PRIORITY, &gPTPTaskTaskHandle);
     }
 
     xTaskCreate(gpioHandleTask, "gpioHandleTask", configMINIMAL_STACK_SIZE, NULL, gpioHandleTask_TASK_PRIORITY, &gpioHandleTaskTaskHandle);

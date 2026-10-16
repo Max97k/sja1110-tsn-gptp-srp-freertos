@@ -2,7 +2,7 @@
 
 [![Target: NXP SJA1110](https://img.shields.io/badge/Target-NXP%20SJA1110%20(Silicon%20E)-005a9c.svg)](https://www.nxp.com/products/interfaces/ethernet-/automotive-ethernet-switches/sja1110-multi-gig-safe-and-secure-tsn-ethernet-switch-with-integrated-100base-t1-phys:SJA1110)
 [![Core: Arm Cortex-M7](https://img.shields.io/badge/Core-Arm%C2%AE%20Cortex%C2%AE--M7%20%40%20200MHz-blue.svg)](https://www.arm.com/products/silicon-ip-cpu/cortex-m/cortex-m7)
-[![RTOS: FreeRTOS 10.2](https://img.shields.io/badge/RTOS-FreeRTOS%2010.2.0-brightgreen.svg)](https://www.freertos.org)
+[![RTOS: FreeRTOS 11.1](https://img.shields.io/badge/RTOS-FreeRTOS%2011.1.0-brightgreen.svg)](https://www.freertos.org)
 [![RTD: 0.9.0 (AUTOSAR 4.4)](https://img.shields.io/badge/RTD-0.9.0%20(AUTOSAR%C2%AE%204.4)-orange.svg)](https://www.nxp.com)
 [![TSN: IEEE 802.1AS + 802.1Qat + 802.1Qav](https://img.shields.io/badge/TSN-802.1AS%20gPTP%20%7C%20802.1Qat%20SRP%20%7C%20802.1Qav%20CBS-purple.svg)](https://1.ieee802.org/tsn/)
 [![Toolchain: GCC 9.2](https://img.shields.io/badge/Toolchain-GCC%209.2%20(arm--none--eabi)-brightgreen.svg)](https://gcc.gnu.org)
@@ -24,7 +24,7 @@
 * **完整 MRP 狀態機家族 (IEEE 802.1Q-2018 Clause 10 & 35)**：
   * **MSRP (`0x22EA`)**：多重串流註冊協議，支援 Talker Advertise、Talker Failed、Listener Ready / Asking Failed / Ready Failed 屬性合併宣告、累積延遲計算，以及各實體埠 SR Class A 與 Class B 頻寬核算。
   * **MVRP (`0x88F5`)**：多重 VLAN 註冊協議，於 8 個外部交換埠間動態傳播與註冊 SR VLAN 成員資格。
-  * **MMRP (`0x88F6`)**：多重 MAC 註冊協議，處理動態群播 MAC 位址註冊與服務屬性宣告。
+  * **MMRP (`0x88F6`)**：多重 MAC 註冊協議，具備硬體入埠攔截 (`macFilter1`) 與 L2 訊框分流介面（狀態機保留為 Stub 預留；動態串流群播轉發由 MSRP Listener Ready 直接觸發 `fdb_update` 完成）。
   * **標準 MRP 申請者 / 註冊者 / LeaveAll 計時器**：完整實作 IEEE 802.1Q 狀態轉換表（`VO`, `VP`, `VN`, `AN`, `AA`, `QA`, `LA`, `AO`, `QO`, `AP`, `QP`, `LO` 與 `IN`, `LV`, `MT`），由確定性 FreeRTOS 軟體計時器池 (`os_timer`) 驅動。
 * **SJA1110 硬體管理訊框 (`0x8B8C`) 攔截與指定埠定向發送管線**：
   * **入埠硬體攔截 (Ingress Trap)**：配置 SJA1110 `GeneralParametersTable` 雙組 MAC 濾波器（`macFilter0` = `01:80:C2:00:00:0E` 攔截 gPTP 與 MSRP；`macFilter1` = `01:80:C2:00:00:20` 搭配遮罩 `FF:FF:FF:FF:FF:FE` 同時攔截 MMRP `01:80:C2:00:00:20` 與 MVRP `01:80:C2:00:00:21`），自動附加含來源埠號 (`SwitchPortIdx 1..8`) 之 `0x8B8C` 標頭並上送內部 Host Port 0。
@@ -98,12 +98,11 @@ SJA1110 內部包含 1 個微控制器主機連接埠 (`Port 0`) 與 8 個外部
         │                 │ EtherType 0x88F7            │ EtherType 0x22EA / 0x88F5 / 0x88F6       │
         │                 ▼                             ▼                  │                       │
         │  ┌──────────────────────────┐   ┌─────────────────────────────┐  │                       │
-        │  │   gPTP_Task (優先權 4)   │   │      SRP_Task (優先權 2)    │  │                       │
+        │  │ gPTPTask (Prio 3, 2ms)   │   │ SRP_PORT_Periodic()         │  │                       │
         │  │ • IEEE 802.1AS GM/Bridge │   │ • MSRP 串流頻寬預留狀態機   ├──┘                       │
-        │  │ • Pdelay / Sync / Follow │   │ • MVRP 動態 VLAN 註冊狀態機 │                          │
-        │  │ • 硬體時間戳記校正       │   │ • MMRP 動態 MAC 註冊狀態機  │                          │
-        │  └──────────────────────────┘   │ • FQTSS 頻寬計算與 CBS 觸發 │                          │
-        │                                 └─────────────────────────────┘                          │
+        │  │ • Eth_Main 與 Eth_Poll   ├──►│ • MVRP 動態 VLAN 註冊狀態機 │                          │
+        │  │ • 硬體時間戳記校正       │   │ • FQTSS 頻寬計算與 CBS 觸發 │                          │
+        │  └──────────────────────────┘   └─────────────────────────────┘                          │
         └──────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -111,10 +110,10 @@ SJA1110 內部包含 1 個微控制器主機連接埠 (`Port 0`) 與 8 個外部
 
 | 協議名稱 | IEEE 國際標準 | EtherType | 目的群播 MAC 位址 | SJA1110 硬體攔截規則 | FreeRTOS 處理任務 |
 | :--- | :--- | :---: | :---: | :--- | :--- |
-| **gPTP** | IEEE 802.1AS-2020 | `0x88F7` | `01:80:C2:00:00:0E` | `macFilter0` (`sendFollowUpTs0 = TRUE`) | `gPTP_Task` (直接回呼) |
-| **MSRP** | IEEE 802.1Qat / 802.1Q-2018 Cl. 35 | `0x22EA` | `01:80:C2:00:00:0E` | `macFilter0` (與 gPTP 共用目的 MAC) | `SRP_Task` (`g_srp_rx_queue`) |
-| **MVRP** | IEEE 802.1Q-2018 Cl. 11 | `0x88F5` | `01:80:C2:00:00:21` | `macFilter1` (`Mask: FF:FF:FF:FF:FF:FE`) | `SRP_Task` (`g_srp_rx_queue`) |
-| **MMRP** | IEEE 802.1Q-2018 Cl. 10 | `0x88F6` | `01:80:C2:00:00:20` | `macFilter1` (`Res : 01:80:C2:00:00:20`) | `SRP_Task` (`g_srp_rx_queue`) |
+| **gPTP** | IEEE 802.1AS-2020 | `0x88F7` | `01:80:C2:00:00:0E` | `DPI Entry #0/#1` + `macFilter0` | `gPTPTask` (`GPTP_PORT_RxIndication`) |
+| **MSRP** | IEEE 802.1Qat / 802.1Q-2018 Cl. 35 | `0x22EA` | `01:80:C2:00:00:0E` | `macFilter0` (與 gPTP 共用目的 MAC) | `gPTPTask` (`g_srp_rx_ring` -> `SRP_PORT_Periodic`) |
+| **MVRP** | IEEE 802.1Q-2018 Cl. 11 | `0x88F5` | `01:80:C2:00:00:21` | `macFilter1` (`Mask: FF:FF:FF:FF:FF:FE`) | `gPTPTask` (`g_srp_rx_ring` -> `SRP_PORT_Periodic`) |
+| **MMRP** | IEEE 802.1Q-2018 Cl. 10 | `0x88F6` | `01:80:C2:00:00:20` | `macFilter1` (`Res : 01:80:C2:00:00:20`) | `gPTPTask` (`g_srp_rx_ring` -> `SRP_PORT_Periodic`) |
 
 ---
 
@@ -133,16 +132,16 @@ SJA1110 內部包含 1 個微控制器主機連接埠 (`Port 0`) 與 8 個外部
 ### 各里程碑詳細技術指標與成果驗收
 
 #### Milestone 1：SRP 協議棧核心與 FreeRTOS OSAL 基礎層建立 (`v1.0.0-m1`)
-- **GenAVB/TSN 核心狀態機移植**：完整抽離 IEEE 802.1Qat / 802.1Q-2018 Clause 10, 11, 34, 35 狀態機（`mrp.c`, `msrp.c`, `mvrp.c`, `mmrp.c`, `srp.c`, `srp_entry.c`, `fqtss.c`, `timer.c`, `sr_class.c`, `qos.c`, `managed_objects.c`, `random.c`）。
+- **GenAVB/TSN 核心狀態機移植**：完整抽離 IEEE 802.1Qat / 802.1Q-2018 Clause 10, 11, 34, 35 狀態機（`mrp.c`, `msrp.c`, `mvrp.c`, `mmrp.c`, `srp.c`, `srp_entry.h`, `fqtss.c`, `timer.c`, `sr_class.c`, `qos.c`, `managed_objects.c`, `random.c`）。
 - **SJA1110 8 埠網橋拓撲對齊**：設定 `CFG_MAX_NUM_PORT = 8`、`CFG_BR_DEFAULT_NUM_PORTS = 8`、`CFG_BR_LOGICAL_PORT_LIST = {2, 3, 4, 5, 6, 7, 8, 9}`，一對一映射至 SJA1110 實體交換埠 `SwitchPortIdx 1..8`；設定 `CFG_TRAFFIC_CLASS_MAX = 8` 與 `CFG_SR_CLASS_MAX = 2`（支援 SR Class A 8 kHz 與 Class B 4 kHz）。
-- **FreeRTOS OSAL 抽象層實作**：完成 `os_malloc`/`os_free` (`pvPortMalloc`/`vPortFree`)、單調奈秒/毫秒時鐘 (`xTaskGetTickCount`)，以及基於 `xTimerCreate`/`xTimerChangePeriod` 之軟體計時器池 (`os_timer`)。
+- **FreeRTOS OSAL 抽象層實作**：完成 `os_malloc`/`os_free` (`pvPortMalloc`/`vPortFree`)、單調奈秒/毫秒時鐘 (`xTaskGetTickCount`)，基於 Tick 驅動之確定性軟體計時器池 (`g_srp_timers`, `SRP_MAX_OS_TIMERS = 64`)，以及支援區塊合併回收之 FreeRTOS `heap_4` 動態記憶體配置器。
 - **網橋優先與架構可擴充性**：預設啟用 Bridge 模式 (`is_bridge = 1`)，同時完整保留 Endpoint 實例 (`msrp_ep` / `mvrp_ep`) 與 IPC 介面供 Milestone 5 擴充。
 
 #### Milestone 2：SJA1110 管理訊框 (`0x8B8C`) 攔截與指定埠收發管線 (`v1.0.1-m2`)
 - **雙通道硬體 MAC 濾波攔截 (`GeneralParametersTable`)**：
   - `macFilter0` (`01:80:C2:00:00:0E`, 遮罩 `FF:FF:FF:FF:FF:FF`)：同時攔截 IEEE 802.1AS gPTP (`0x88F7`) 與 IEEE 802.1Qat MSRP (`0x22EA`) 訊框並上送內部 Host Port 0。
   - `macFilter1` (`01:80:C2:00:00:20`, 遮罩 `FF:FF:FF:FF:FF:FE`, `sendFollowUpTs1 = FALSE`)：利用最低位元遮罩同時攔截 IEEE 802.1Q MMRP (`01:80:C2:00:00:20`, `0x88F6`) 與 MVRP (`01:80:C2:00:00:21`, `0x88F5`) 訊框並附上來源 `SwitchPortIdx` 標頭。
-- **零干擾 RX 多工分流 (`EthIf_RxIndication`)**：維持 `0x88F7` 直接進入 `GPTP_MsgReceive()` 零延遲路徑，並將 `0x22EA` / `0x88F5` / `0x88F6` 轉換為 `logical_port = SwitchPortIdx + 1` 送入 `g_srp_rx_queue`。
+- **零干擾 RX 多工分流 (`EthIf_RxIndication`)**：維持 `0x88F7` 直接進入 `GPTP_MsgReceive()` 零延遲路徑，並將 `0x22EA` / `0x88F5` / `0x88F6` 轉換為 `logical_port = SwitchPortIdx + 1` 送入 `g_srp_rx_ring` 環形佇列。
 - **指定實體埠定向發送 (`net_tx`)**：串接 `Eth_ProvideTxBuffer` $\to$ `EthSwt_43_SJA11XX_SetMgmtInfo` $\to$ `EthSwt_43_SJA11XX_EthTxProcessFrame` $\to$ `Eth_Transmit` $\to$ `Eth_TxConfirmation`，確保在單一 TX Buffer Descriptor (`BufferCount = 1U`) 配置下發送後立即釋放緩衝區。
 
 #### Milestone 3：交換機硬體卸載整合 (CBS 整形器、L2 TCAM 與 VLAN 表) (`v1.0.2-m3`)
@@ -151,11 +150,11 @@ SJA1110 內部包含 1 個微控制器主機連接埠 (`Port 0`) 與 8 個外部
 - **4096-VID 硬體 VLAN 查找表卸載**：將 `vlan_update()` / `vlan_delete()` 對接至 `Switch_Ip_GetVlanLookupEntry()` 與 `Switch_Ip_UpdateVlanLookupEntry()`，動態更新各埠 `vlanDomain` 與 `tagPort` 並確保 `Switch_Ip_Port0` (Host CPU) 維持成員權限。
 
 #### Milestone 4：FreeRTOS 雙協議棧共整合、建置與實機驗證 (`v1.0.3-m4`)
-- **確定性多任務優先權排程**：
-  - `gPTP_Task` (`tskIDLE_PRIORITY + 4`)：最高優先權處理 IEEE 802.1AS 時間同步與硬體時鐘鎖相。
-  - `Eth_Task` (`tskIDLE_PRIORITY + 3`)：1 ms 週期輪詢乙太網收發 (`Eth_RxIrqCallback`) 與實體埠 Link 狀態。
-  - `SRP_Task` (`tskIDLE_PRIORITY + 2`)：事件驅動處理 MRP PDU 佇列、`os_timer` 逾時事件與硬體表項卸載。
-- **RTOS 資源擴充**：於 `FreeRTOSConfig.h` 將 `configTOTAL_HEAP_SIZE` 擴充至 `49152` (48 KB)，並啟用 `configUSE_TIMERS = 1`。
+- **確定性協同多任務排程**：
+  - `gPTPTask` (`Priority 3`, 2 ms 週期, `2048` words 堆疊)：於單一任務迴圈內依序協同執行 `GPTP_TimerPeriodic()`、`Eth_Main()`、`Eth_Poll()`、`SRP_PORT_Periodic()` 與 `FLASH_Write_Poll()`，徹底避免單一 ENET TX Buffer Descriptor (`ringSize = 1U`) 與 `Switch_Ip` 硬體存取之跨執行緒鎖競爭。
+  - `gpioHandleTask` (`Priority 2`, 20 ms 週期)：定期輪詢 SJA1110 板載 PHY、SFP、PMIC 與按鍵 GPIO 中斷旗標。
+  - `aliveLEDTimer` (`Priority 3`, 500 ms FreeRTOS 軟體計時器, `512` words 計時器任務堆疊)：定期翻轉板載 Alive LED 指示燈。
+- **RTOS 資源擴充**：於 `FreeRTOSConfig.h` 將 `configTOTAL_HEAP_SIZE` 擴充至 `49152` (48 KB，搭配支援記憶體釋放合併之 `heap_4` 分配器)，並啟用 `configUSE_TIMERS = 1`。
 - **實機編譯與 Wireshark 封包驗收**：完成 S32DS GCC 零錯誤編譯、Dual-Bank SPI NVM 映像檔產出，並於 `SW1 Port 4` (1G SFP) 驗證 gPTP 與 MSRP/MVRP 控制訊框同步收發。
 
 #### Milestone 5：TSN Endpoint 端點模式 (`is_bridge = 0`) 與本地 IPC 擴充 (`v1.1.0-m5`)
@@ -168,19 +167,20 @@ SJA1110 內部包含 1 個微控制器主機連接埠 (`Port 0`) 與 8 個外部
 ```
 .
 ├── board/                              # SJA1110 硬體接腳、交換矩陣靜態配置與板級驅動
-├── FreeRTOS/                           # FreeRTOS v10.2.0 核心與 Arm Cortex-M7 移植層
+├── FreeRTOS/                           # FreeRTOS v11.1.0 核心、heap_4 記憶體管理與 Cortex-M7 移植層
 ├── generate/                           # S32 Configuration Tools (MEX) 產生之 RTD 配置檔
 │   └── include/FreeRTOSConfig.h        # FreeRTOS 排程器、Heap (48 KB) 與軟體計時器配置
 ├── gptp_stack/                         # IEEE 802.1AS gPTP 高精度時間同步協議棧
 │   ├── gptp_core/                      # gPTP 核心狀態機 (Pdelay, Sync, FollowUp, BMCA)
 │   └── port/gptp_port.c                # SJA1110 Eth/EthSwt 訊框收發與硬體時鐘轉接層
-├── include/                            # 應用層標頭檔 (EthIf.h, callbacks.h)
+├── include/                            # 應用層標頭檔 (example_init.h, gptp_cbk.h)
 ├── Project_Settings/                   # 鏈結腳本 (Flash/RAM)、啟動代碼、除錯器設定
 ├── RTD/                                # NXP Real Time Drivers (Eth, EthSwt, Switch_Ip, Spi, Gpt)
 ├── src/                                # 主程式與系統整合原始碼
-│   ├── main.c                          # Dual-bank 啟動檢查、FreeRTOS 任務建立 (gPTP, Eth, SRP)
+│   ├── main.c                          # Dual-bank 啟動檢查、NVM 快取、FreeRTOS 任務建立 (gPTPTask, gpioHandleTask)
 │   ├── EthIf.c                         # 0x8B8C 交換機管理訊框分流器 (gPTP + MSRP/MVRP/MMRP)
-│   └── callbacks.c                     # 交換埠連線狀態、按鍵中斷與 RGB/Alive LED 控制
+│   ├── example_init.c                  # SJA1110 交換機與 PHY 初始化、中斷處理與 RGB LED 控制
+│   └── gptp_cbk.c                      # gPTP Domain 選擇、時間同步與時鐘更新回呼函式
 ├── srp_stack/                          # IEEE 802.1Qat 串流預留協議棧 (SRP Stack)
 │   ├── common/                         # FQTSS 頻寬核算、計時器池、SR Class 與 QoS 定義
 │   │   ├── fqtss.c                     # Credit-Based Shaper (CBS) 頻寬累加與硬體卸載觸發
