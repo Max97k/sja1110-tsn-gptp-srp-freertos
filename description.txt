@@ -1,0 +1,169 @@
+1. Example Description
+
+   This example demonstrates the usage of gPTP Stack together with FreeRTOS and Dual Banking
+   on the SJA1110-MGS-EVM board using HLD (High Level Drivers).
+   The gPTP stack can operate in two modes:
+   - Grand Master mode (default configuration for this example)
+   - Follower mode (can be configured as needed)
+
+   Key Features:
+
+   Dual Bank Solution for Firmware Updates:
+   - Primary partition contains only a boot loader
+   - After booting primary partition, boot loader loads application from active bank
+   - During update, only one bank is updated at a time
+   - If update fails, second bank automatically becomes active
+   - This ensures safe firmware updates with automatic rollback protection
+
+   gPTP Stack Integration:
+   - Provides precision time synchronization over Ethernet
+   - Supports both Grand Master and Follower modes
+   - Runs as Grand Master domain by default for MGS-SJA1110 board
+
+   FreeRTOS Integration:
+   - Real-time operating system for task scheduling
+   - gPTP task runs via FreeRTOS scheduler instead of callbacks
+   - Enables efficient thread switching and task management
+
+   Additional Features:
+   - Board enablement package toggles alive LED
+   - RGB LED changes colors on button interrupts
+   - PHY, PMIC, and PCAL interrupt handling enabled
+   - PCAL9722 GPIO extender over SPI provides extended GPIO access
+   - GPIO toggling via link-layer callbacks
+   - Interrupt-driven architecture for responsive peripheral control and real-time diagnostics
+
+2. Installation steps
+
+   2.1 Hardware installation
+
+       2.1.1 Supported boards
+             - SJA1110-MGS-EVM board SCH-94089 REV A 700-94089 REV X1
+             - SJA1110 Silicon E
+
+       2.1.2 Hardware Configuration
+
+             For the project to work correctly, several DIP switches must be configured
+             to ensure signals are routed as expected by the software.
+
+             DIP Switch Settings:
+             - SW7 = ON (SJA1110 BOOT_OPTION1)
+             - All other switches not mentioned below should be set to OFF
+
+             Jumper Positions (must be set as follows):
+             - J58: 1-2
+             - J61: 1-2
+             - J77: 1-2
+             - All other jumpers not mentioned should be left open (disconnected)
+
+       2.1.3 Debugger
+
+             The debugger must be connected to J16 (10-pin JTAG Cortex Debug connector).
+             Ensure proper connection before attempting to program or debug.
+
+       2.1.4 Other Hardware items
+
+             Required Connections:
+             - Ethernet cable connected between the Ethernet port of the PC and the SW1 Port 4
+               using an SFP Converter
+
+             SFP Converter Requirements:
+             - Must support auto-negotiation (recommended)
+             - Must work at 1Gb/s speed
+             - If the SFP Converter does not support auto-negotiation but supports 1Gb/s:
+               Remove SGMII PHY auto-negotiation in configuration and set it to fixed speed of 1Gb/s
+
+   2.2 Software installation
+
+       2.2.1 Importing the S32 Design Studio project
+
+             Steps to import the project:
+             1. Open S32 Design Studio
+             2. Go to "File -> New -> S32DS Project from Example"
+             3. Navigate to "SJA1110 Reference Applications AUTOSAR 4.4 0.3.0"
+             4. Select "SJA1110 Reference Applications"
+             5. Select "SJA1110_MGS_gPTP_FreeRTOS"
+             6. Click "Finish"
+
+             Note: The project will be copied into your current workspace.
+
+       2.2.2 Required software installation
+
+             Python Requirements:
+             - Python 3.x or higher must be installed on your system
+
+             Required Python Packages:
+
+             1. "Pyelftools" package
+                - Install from: https://pypi.org/project/pyelftools/
+                - Or run command: pip install pyelftools
+
+             2. "Cryptodome" package
+                - Install from: https://pypi.org/project/pycryptodomex/
+                - Or run command: pip install pycryptodomex
+
+             These packages are required for building and generating the firmware images.
+
+3. Generating, building and running the example application
+
+   3.1 Generating the S32 configuration
+
+       Before running the example, a hardware configuration needs to be generated.
+
+       Steps:
+       1. Switch to the "Peripherals" view in S32 Design Studio
+       2. Select this project from the project list
+       3. Click "Update Code" button
+       4. Wait for code generation to complete
+       5. Verify that all files are successfully generated (check console output)
+
+   3.2 Compiling the application
+
+       Steps:
+       1. Switch back to "Code" view
+       2. Select the debug mode you want to use (RAM/FLASH)
+       3. Build the project (Project -> Build Project or use toolbar)
+       4. Wait for the build action to be completed before continuing
+       5. Check the compiler console for any error messages
+       6. Upon successful completion, the *.elf binary file should be created
+
+   3.3 Running the application on the board
+
+       Steps:
+       1. Go to "Run -> Run Configurations"
+       2. Select the configuration you want to use (matching your build: RAM or FLASH)
+       3. Click "Run" to download and execute the application
+       4. Monitor the console output for any error messages
+
+4. Validation
+
+   Testing the Application:
+
+   Network Traffic Verification:
+   - Connect Ethernet cable from your PC to SGMII Port 4 of SJA1110-MGS board using SFP converter
+   - Open Wireshark on your PC and select the appropriate network interface
+   - Start packet capture
+   - PTP messages shall be captured on Wireshark (Sync/Follow-Up) at every 125ms
+   - This confirms the gPTP stack is running correctly in Grand Master mode.
+
+   LED Indicators:
+
+   RGB LED Color Meanings:
+   - GREEN: Image 1 (Bank 1) booted successfully
+   - YELLOW: Image 2 (Bank 2) booted OR Image 1 is corrupted
+
+   RGB LED Behavior:
+   - The RGB LED should flash Green or Yellow every time a frame is transmitted on the configured port
+   - The color depends on which image booted:
+     * Image 1 -> Green color
+     * Image 2 -> Yellow color
+   - If the first image from app_flash.elf is corrupted (e.g., partition address is wrong),
+     the RGB LED will use Yellow color going forward
+   - If everything is clean and Image 1 boots correctly, it shall use Green color
+
+   Additional Validation Points:
+   - Alive LED should toggle periodically, indicating the system is running
+   - Button presses should trigger RGB LED color changes
+   - FreeRTOS scheduler manages thread switching
+   - gPTP task is called using the FreeRTOS scheduler instead of callbacks
+

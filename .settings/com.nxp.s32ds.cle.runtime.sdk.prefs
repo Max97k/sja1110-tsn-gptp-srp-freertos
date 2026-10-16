@@ -1,0 +1,3 @@
+FILTER_SDKs_SHOW_LATEST_VERSIONS=false
+com.freescale.s32ds.cross.sdk.support.attachedSDKs=PlatformSDK_SJA11xx_1_0_0_SJA1110_M7_1.0.1_PATH|Debug_RAM|Debug_RAM-E
+eclipse.preferences.version=1

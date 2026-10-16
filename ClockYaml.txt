@@ -1,0 +1,45 @@
+/* TEXT BELOW IS USED AS SETTING FOR TOOLS *************************************
+!!Configuration
+name: ClockConfig0
+called_from_default_init: true
+outputs:
+- {id: ENET0_CLK.outFreq, value: 200 MHz}
+- {id: ENET0_TIME_CLK.outFreq, value: 2.5 MHz}
+- {id: FROOUT.outFreq, value: 10 MHz}
+- {id: ISO_CLK.outFreq, value: 25 MHz}
+- {id: LPSPI0_CLK.outFreq, value: 50 MHz}
+- {id: LPSPI1_CLK.outFreq, value: 50 MHz}
+- {id: MCSS_CLK.outFreq, value: 200 MHz}
+- {id: PLL0_CLK.outFreq, value: 250 MHz}
+- {id: PLL0_IDIV_0.outFreq, value: 2.5 MHz}
+- {id: PLL0_IDIV_1.outFreq, value: 25 MHz}
+- {id: PLL0_IDIV_2.outFreq, value: 125 MHz}
+- {id: PLL0_IDIV_3.outFreq, value: 50 MHz}
+- {id: PLL0_IDIV_4.outFreq, value: 5 MHz}
+- {id: PLL1_CLK.outFreq, value: 200 MHz}
+- {id: PLL1_FDIV_0.outFreq, value: 200 MHz}
+- {id: QSPI0_CLK.outFreq, value: 5 MHz}
+- {id: SAFE_CLK.outFreq, value: 10 MHz}
+- {id: SYSTEM_CLK.outFreq, value: 125 MHz}
+- {id: TEST_CLK.outFreq, value: 25 MHz}
+- {id: TIMER_CLK.outFreq, value: 2.5 MHz}
+- {id: TPR_CLK.outFreq, value: 25 MHz}
+- {id: XMII_125MHZ_CLK.outFreq, value: 125 MHz}
+- {id: XMII_25MHZ_CLK.outFreq, value: 25 MHz}
+- {id: XMII_2M5HZ_CLK.outFreq, value: 2.5 MHz}
+- {id: XMII_50MHZ_CLK.outFreq, value: 50 MHz}
+- {id: XOSCOUT.outFreq, value: 25 MHz}
+settings:
+- {id: PLL0_IDIV0.scale, value: '100', locked: true}
+- {id: PLL0_IDIV1.scale, value: '10', locked: true}
+- {id: PLL0_IDIV2.scale, value: '2', locked: true}
+- {id: PLL0_IDIV3.scale, value: '5', locked: true}
+- {id: PLL0_IDIV4.scale, value: '50', locked: true}
+- {id: PLL0_M_DIV.scale, value: '20', locked: true}
+- {id: PLL0_N_DIV.scale, value: '1', locked: true}
+- {id: PLL0_P_DIV.scale, value: '2', locked: true}
+- {id: PLL1_M_DIV.scale, value: '16', locked: true}
+- {id: PLL1_N_DIV.scale, value: '1', locked: true}
+- {id: PLL1_P_DIV.scale, value: '2', locked: true}
+ * BE CAREFUL MODIFYING THIS COMMENT - IT IS YAML SETTINGS FOR TOOLS **********/
+   
