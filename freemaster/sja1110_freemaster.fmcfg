@@ -1,7 +1,6 @@
 {
   "port": 8090,
   "web_root": "web",
-  "open_path": "/index.html",
   "connections": [],
   "variables": [
     {
