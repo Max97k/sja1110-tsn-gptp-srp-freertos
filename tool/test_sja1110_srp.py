@@ -21,6 +21,9 @@ import threading
 import time
 from scapy.all import Ether, Raw, sendp, sniff, conf
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 # ---------------------------------------------------------------------------
 # CLI Arguments & Auto-detection
 # ---------------------------------------------------------------------------
@@ -70,9 +73,19 @@ def build_mvrp_join_vid2() -> Ether:
     return Ether(dst="01:80:c2:00:00:21", src=PC_MAC, type=0x88F5) / Raw(load=pdu)
 
 
+def build_msrp_domain_class_a(sr_class_id: int = 6, priority: int = 3, vlan_id: int = 2) -> Ether:
+    """IEEE 802.1Qat MSRP Domain (AttributeType = 4) PDU to clear SR Class A Domain Boundary Port."""
+    first_val = struct.pack("!BBH", sr_class_id, priority, vlan_id)
+    attr_list_len = 2 + 4 + 1 + 2
+    pdu = (struct.pack("!BBBHH", 0x00, 0x04, 4, attr_list_len, 0x0001) +
+           first_val +
+           struct.pack("!BHH", 0x24, 0x0000, 0x0000))
+    return Ether(dst="01:80:c2:00:00:0e", src=PC_MAC, type=0x22EA) / Raw(load=pdu)
+
+
 def build_msrp_talker_advertise(
     stream_id_hex: str = "0011223344550001",
-    stream_da_hex: str = "91e0f000fe01",
+    stream_da_hex: str = "91e0f000fe00",
     vlan_id: int = 2,
     max_frame_size: int = 128,
     max_interval_frames: int = 1,
@@ -107,13 +120,15 @@ def build_msrp_talker_advertise(
 
 
 def build_msrp_listener_ready(stream_id_hex: str = "0011223344550001") -> Ether:
-    """IEEE 802.1Qat MSRP Listener Ready PDU."""
+    """IEEE 802.1Qat MSRP Listener Ready PDU.
+    ThreePackedEvent = JoinIn (1 * 36 = 0x24), FourPackedEvent = Ready (2 * 64 = 0x80).
+    """
     stream_id = bytes.fromhex(stream_id_hex)
     attr_list_len = 2 + 8 + 1 + 1 + 2
     pdu = (struct.pack("!BBBHH",
                        0x00, 0x03, 8, attr_list_len, 0x0001) +
            stream_id +
-           struct.pack("!BBHH", 0x80, 0x00, 0x0000, 0x0000))
+           struct.pack("!BBHH", 0x24, 0x80, 0x0000, 0x0000))
     return Ether(dst="01:80:c2:00:00:0e", src=PC_MAC, type=0x22EA) / Raw(load=pdu)
 
 
@@ -124,11 +139,8 @@ def respond_pdelay_req(raw: bytes, src_mac: str) -> None:
     seq = int.from_bytes(raw[30:32], "big")
     req_port_id = raw[20:30]  # sourcePortIdentity of initiator
 
-    now = time.time()
-    t2_sec = int(now)
-    t2_nsec = int((now - t2_sec) * 1e9)
-    t3_sec = t2_sec
-    t3_nsec = (t2_nsec + 35000) % 1000000000
+    t2_total_ns = time.time_ns()
+    t2_sec, t2_nsec = divmod(t2_total_ns, 1_000_000_000)
 
     # Pdelay_Resp (Type 3, length 54)
     resp_hdr = struct.pack("!BBHBBHQIH10sHBB",
@@ -139,6 +151,10 @@ def respond_pdelay_req(raw: bytes, src_mac: str) -> None:
     resp_payload = resp_hdr + t2_bytes + req_port_id
     resp_pkt = Ether(dst="01:80:c2:00:00:0e", src=PC_MAC, type=0x88F7) / Raw(load=resp_payload)
     sendp(resp_pkt, iface=IFACE, verbose=False)
+
+    # Capture actual t3 egress timestamp (with proper second carry) after sending Pdelay_Resp
+    t3_total_ns = max(time.time_ns(), t2_total_ns + 1000)
+    t3_sec, t3_nsec = divmod(t3_total_ns, 1_000_000_000)
 
     # Pdelay_Resp_Follow_Up (Type 10, length 54)
     fup_hdr = struct.pack("!BBHBBHQIH10sHBB",
@@ -221,8 +237,11 @@ if __name__ == "__main__":
     sendp(build_mvrp_join_vid2(), iface=IFACE, verbose=False)
     print("  [TX MVRP] JoinIn VID=2 sent to 01:80:C2:00:00:21")
 
-    # Stage 3: T5-B MSRP Talker Advertise Injection
-    print("\n=== Stage 3: [T5-B] Injecting MSRP Talker Advertise (StreamID=0011223344550001) ===")
+    # Stage 3: T5-B MSRP Domain & Talker Advertise Injection
+    print("\n=== Stage 3: [T5-B] Injecting MSRP Domain (Class A) & Talker Advertise (StreamID=0011223344550001) ===")
+    sendp(build_msrp_domain_class_a(), iface=IFACE, verbose=False)
+    print("  [TX MSRP] Domain (SRclassID=6, Priority=3, VID=2) sent to clear Domain Boundary Port")
+    time.sleep(0.1)
     sendp(build_msrp_talker_advertise(), iface=IFACE, verbose=False)
     print("  [TX MSRP] Talker Advertise (StreamID=0011223344550001, VID=2, Priority 3) sent")
 
@@ -232,10 +251,18 @@ if __name__ == "__main__":
     sendp(build_msrp_listener_ready(), iface=IFACE, verbose=False)
     print("  [TX MSRP] Listener Ready (StreamID=0011223344550001) sent")
 
-    # Stage 5: Observe MRP Convergence & Pdelay exchanges (6 seconds)
+    # Stage 5: Observe MRP Convergence & Pdelay exchanges (6 seconds, with IEEE 802.1Qat JoinIn refresh)
     print("\n=== Stage 5: [T4/T5] Observing MRP State Machine Convergence & Pdelay (6 s) ===")
-    sniff(iface=IFACE, prn=packet_handler, timeout=6,
-          filter="ether proto 0x88f7 or ether proto 0x22ea or ether proto 0x88f5 or ether proto 0x8b8c")
+    for _round_idx in range(3):
+        sniff(iface=IFACE, prn=packet_handler, timeout=2,
+              filter="ether proto 0x88f7 or ether proto 0x22ea or ether proto 0x88f5 or ether proto 0x8b8c")
+        sendp(build_mvrp_join_vid2(), iface=IFACE, verbose=False)
+        sendp(build_msrp_domain_class_a(), iface=IFACE, verbose=False)
+        time.sleep(0.05)
+        sendp(build_msrp_talker_advertise(), iface=IFACE, verbose=False)
+        time.sleep(0.05)
+        sendp(build_msrp_listener_ready(), iface=IFACE, verbose=False)
+    time.sleep(0.25)
 
     # ---------------------------------------------------------------------------
     # Report & Scorecard

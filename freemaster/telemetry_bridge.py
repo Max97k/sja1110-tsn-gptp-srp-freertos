@@ -15,6 +15,9 @@ from aiohttp import web
 import websockets
 from scapy.all import Ether, Raw, conf, sendp, sniff
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 # ---------------------------------------------------------------------------
 # Network Interface Auto-Detection
 # ---------------------------------------------------------------------------
@@ -50,16 +53,68 @@ stats = {
     "msrp_count": 0,
     "mvrp_count": 0,
     "leak_8b8c": 0,
-    "pdelay_ns": 128.5,
-    "free_heap_bytes": 19576,
-    "min_free_heap_bytes": 19576,
-    "gptp_initialized": True,
-    "vlan_offload": "VID 2 (ACTIVE)",
-    "tcam_offload": "91:E0:F0:00:FE:00 -> Port 4",
-    "cbs_slope_bps": 16384000,
-    "port_links": [True, True, True, True, False, False, False, True],
-    "port_rates": ["100M", "100M", "100M", "1Gbps", "100BASE-T1", "100BASE-T1", "100BASE-T1", "100M"]
+    "probe_connected": False,
+    "telemetry_source": "Wire-Derived Only (No MCU Probe Connected)",
+    "pdelay_ns": None,
+    "free_heap_bytes": None,
+    "min_free_heap_bytes": None,
+    "gptp_initialized": False,
+    "vlan_offload": "UNVERIFIED (Connect Probe / Awaiting MVRP)",
+    "tcam_offload": "UNVERIFIED (Connect Probe / Awaiting MSRP)",
+    "cbs_slope_bps": None,
+    "port_links": [False, False, False, True, False, False, False, False],
+    "port_rates": ["1G SGMII", "1G RGMII", "100M SGMII", "1G SFP (PC)", "100BASE-T1", "100BASE-T1", "100BASE-T1", "100M MII"]
 }
+
+FREEMASTER_RPC_URL = os.environ.get("FREEMASTER_RPC_URL", "ws://127.0.0.1:8090")
+
+
+async def poll_mcu_probe_once():
+    """Attempt to read live MCU SRAM telemetry (`g_srp_telemetry` & `rGptpCfgParams`)
+    from FreeMASTER Lite JSON-RPC server (default ws://127.0.0.1:8090).
+    Leaves telemetry fields as None/UNVERIFIED if no probe is connected.
+    """
+    try:
+        async with websockets.connect(FREEMASTER_RPC_URL, open_timeout=0.4, close_timeout=0.2) as rpc:
+            req = {"jsonrpc": "2.0", "id": 1, "method": "ReadVariable", "params": {"name": "g_srp_telemetry.free_heap_bytes"}}
+            await rpc.send(json.dumps(req))
+            resp = json.loads(await asyncio.wait_for(rpc.recv(), timeout=0.4))
+            if "result" in resp and resp["result"].get("success"):
+                stats["probe_connected"] = True
+                stats["telemetry_source"] = "Live MCU Probe (FreeMASTER JSON-RPC)"
+                stats["free_heap_bytes"] = int(resp["result"]["data"])
+                for var_name, key in [
+                    ("g_srp_telemetry.min_free_heap_bytes", "min_free_heap_bytes"),
+                    ("g_srp_telemetry.port4_cbs_slope_bps", "cbs_slope_bps"),
+                ]:
+                    await rpc.send(json.dumps({"jsonrpc": "2.0", "id": 2, "method": "ReadVariable", "params": {"name": var_name}}))
+                    r2 = json.loads(await asyncio.wait_for(rpc.recv(), timeout=0.4))
+                    if "result" in r2 and r2["result"].get("success"):
+                        stats[key] = int(r2["result"]["data"])
+
+                # Read active_vlan_id, active_tcam_dest_ports, and port_link_mask
+                await rpc.send(json.dumps({"jsonrpc": "2.0", "id": 3, "method": "ReadVariable", "params": {"name": "g_srp_telemetry.active_vlan_id"}}))
+                rv = json.loads(await asyncio.wait_for(rpc.recv(), timeout=0.4))
+                if "result" in rv and rv["result"].get("success"):
+                    vid = int(rv["result"]["data"])
+                    stats["vlan_offload"] = f"VID={vid} ACTIVE (Switch_Ip VLAN Table)" if vid > 0 else "IDLE (No Dynamic MVRP VID)"
+
+                await rpc.send(json.dumps({"jsonrpc": "2.0", "id": 4, "method": "ReadVariable", "params": {"name": "g_srp_telemetry.active_tcam_dest_ports"}}))
+                rt = json.loads(await asyncio.wait_for(rpc.recv(), timeout=0.4))
+                if "result" in rt and rt["result"].get("success"):
+                    dports = int(rt["result"]["data"])
+                    stats["tcam_offload"] = f"ACTIVE (DestMask=0x{dports:04X})" if dports > 0 else "IDLE (No Active Stream FDB)"
+
+                await rpc.send(json.dumps({"jsonrpc": "2.0", "id": 5, "method": "ReadVariable", "params": {"name": "g_srp_telemetry.port_link_mask"}}))
+                rl = json.loads(await asyncio.wait_for(rpc.recv(), timeout=0.4))
+                if "result" in rl and rl["result"].get("success"):
+                    lmask = int(rl["result"]["data"])
+                    stats["port_links"] = [bool(lmask & (1 << i)) for i in range(8)]
+                return True
+    except Exception:
+        stats["probe_connected"] = False
+        stats["telemetry_source"] = "Wire-Derived Only (No MCU Probe Connected)"
+    return False
 
 # ---------------------------------------------------------------------------
 # Frame Dissectors & Builders
@@ -116,12 +171,28 @@ def dissect_msrp(raw: bytes):
 
 def dissect_mvrp(raw: bytes):
     proto = "MVRP"
-    info = "Dynamic VLAN Registration PDU (VID=2)"
+    if len(raw) < 7:
+        return proto, "mvrp", f"Short/LeaveAll MVRP PDU ({len(raw)}B)", {"RawBytes": raw.hex()}
+    proto_ver = raw[0]
+    attr_type = raw[1]
+    attr_len = raw[2]
+    vec_hdr = int.from_bytes(raw[3:5], "big")
+    lva = (vec_hdr >> 13) & 0x07
+    num_vals = vec_hdr & 0x1FFF
+    vid = int.from_bytes(raw[5:7], "big") if attr_len == 2 and len(raw) >= 7 else 0
+    ev_byte = raw[7] if len(raw) >= 8 else 0
+    ev0 = ev_byte // 36
+    ev_names = {0: "New", 1: "JoinIn", 2: "In", 3: "JoinMt", 4: "Mt", 5: "Lv"}
+    ev_str = f"{ev_names.get(ev0, f'Evt({ev0})')} (0x{ev_byte:02X})"
+    info = f"VID={vid}, Event={ev_str}, NumValues={num_vals}, LeaveAll={lva}"
     fields = {
-        "ProtocolVersion": raw[0] if len(raw) > 0 else 0,
-        "AttributeType": "VLAN Identifier (VID)",
-        "RegisteredVID": 2,
-        "ThreePackedEvent": "JoinIn (0x24)"
+        "ProtocolVersion": proto_ver,
+        "AttributeType": f"VID ({attr_type})",
+        "AttributeLength": attr_len,
+        "LeaveAllEvent": lva,
+        "NumberOfValues": num_vals,
+        "FirstValue_VID": vid,
+        "ThreePackedEvent": ev_str,
     }
     return proto, "mvrp", info, fields
 
@@ -145,11 +216,8 @@ def respond_pdelay_req(raw: bytes):
     seq = int.from_bytes(raw[30:32], "big")
     req_port_id = raw[20:30]
 
-    now = time.time()
-    t2_sec = int(now)
-    t2_nsec = int((now - t2_sec) * 1e9)
-    t3_sec = t2_sec
-    t3_nsec = (t2_nsec + 35000) % 1000000000
+    t2_total_ns = time.time_ns()
+    t2_sec, t2_nsec = divmod(t2_total_ns, 1_000_000_000)
 
     resp_hdr = struct.pack("!BBHBBHQIH10sHBB",
         0x13, 0x02, 54, 0x00, 0x00, 0x0208, 0, 0, 0,
@@ -159,6 +227,9 @@ def respond_pdelay_req(raw: bytes):
     resp_payload = resp_hdr + t2_bytes + req_port_id
     resp_pkt = Ether(dst="01:80:c2:00:00:0e", src=PC_MAC, type=0x88F7) / Raw(load=resp_payload)
     sendp(resp_pkt, iface=IFACE, verbose=False)
+
+    t3_total_ns = max(time.time_ns(), t2_total_ns + 1000)
+    t3_sec, t3_nsec = divmod(t3_total_ns, 1_000_000_000)
 
     fup_hdr = struct.pack("!BBHBBHQIH10sHBB",
         0x1A, 0x02, 54, 0x00, 0x00, 0x0008, 0, 0, 0,
@@ -209,6 +280,8 @@ def on_packet_received(pkt):
 
     if et == 0x88F7:
         proto, tag, info, fields = dissect_gptp(raw_bytes)
+        if not is_outbound:
+            stats["gptp_initialized"] = True
         if "Sync" in proto:
             stats["gptp_sync"] += 1
         elif "Follow_Up" in proto:
@@ -270,20 +343,26 @@ def inject_mvrp_join():
 
 
 def inject_msrp_talker():
+    # First send MSRP Domain (Class A: SRclassID=6, Priority=3, VID=2) to clear Domain Boundary Port on Port 4
+    dom_pdu = struct.pack("!BBBHHBBHBHH", 0x00, 0x04, 4, 9, 0x0001, 6, 3, 2, 0x24, 0, 0)
+    dom_pkt = Ether(dst="01:80:c2:00:00:0e", src=PC_MAC, type=0x22EA) / Raw(load=dom_pdu)
+    sendp(dom_pkt, iface=IFACE, verbose=False)
+
     stream_id = bytes.fromhex("0011223344550001")
-    stream_da = bytes.fromhex("91e0f000fe01")
+    stream_da = bytes.fromhex("91e0f000fe00")
     first_val = stream_id + stream_da + struct.pack("!HHHBI", 2, 128, 1, (3 << 5) | (1 << 4), 1000)
     attr_list_len = 2 + 25 + 1 + 2
     pdu = struct.pack("!BBBHH", 0x00, 0x01, 25, attr_list_len, 0x0001) + first_val + struct.pack("!BHH", 36, 0, 0)
     pkt = Ether(dst="01:80:c2:00:00:0e", src=PC_MAC, type=0x22EA) / Raw(load=pdu)
     sendp(pkt, iface=IFACE, verbose=False)
-    return {"status": "ok", "msg": "MSRP Talker Advertise (StreamID=0011223344550001) injected"}
+    return {"status": "ok", "msg": "MSRP Domain (Class A) + Talker Advertise (StreamID=0011223344550001, DA=91:E0:F0:00:FE:00) injected"}
 
 
 def inject_msrp_listener():
     stream_id = bytes.fromhex("0011223344550001")
     attr_list_len = 2 + 8 + 1 + 1 + 2
-    pdu = struct.pack("!BBBHH", 0x00, 0x03, 8, attr_list_len, 0x0001) + stream_id + struct.pack("!BBHH", 0x80, 0x00, 0, 0)
+    # ThreePackedEvent = JoinIn (0x24), FourPackedEvent = Ready (0x80)
+    pdu = struct.pack("!BBBHH", 0x00, 0x03, 8, attr_list_len, 0x0001) + stream_id + struct.pack("!BBHH", 0x24, 0x80, 0, 0)
     pkt = Ether(dst="01:80:c2:00:00:0e", src=PC_MAC, type=0x22EA) / Raw(load=pdu)
     sendp(pkt, iface=IFACE, verbose=False)
     return {"status": "ok", "msg": "MSRP Listener Ready (StreamID=0011223344550001) injected"}
@@ -332,20 +411,26 @@ async def api_inject_listener(request):
 
 async def api_selftest(request):
     inject_mvrp_join()
-    time.sleep(0.1)
+    await asyncio.sleep(0.1)
     inject_msrp_talker()
-    time.sleep(0.1)
+    await asyncio.sleep(0.1)
     inject_msrp_listener()
-    stats["vlan_offload"] = "VID 2 (ACTIVE)"
-    stats["tcam_offload"] = "91:E0:F0:00:FE:00 -> Port 4"
-    stats["cbs_slope_bps"] = 16384000
-    return web.json_response({"status": "ok", "msg": "All TSN offload stages injected & verified"})
+    # If FreeMASTER JSON-RPC probe is connected, trigger MCU g_srp_run_selftest = 1
+    try:
+        async with websockets.connect(FREEMASTER_RPC_URL, open_timeout=0.4, close_timeout=0.2) as rpc:
+            await rpc.send(json.dumps({"jsonrpc": "2.0", "id": 99, "method": "WriteVariable", "params": {"name": "g_srp_run_selftest", "value": 1}}))
+            await asyncio.wait_for(rpc.recv(), timeout=0.4)
+    except Exception:
+        pass
+    await poll_mcu_probe_once()
+    return web.json_response({"status": "ok", "probe_connected": stats["probe_connected"], "msg": "Test frames injected on wire (and MCU selftest triggered if probe attached)"})
 
 
 async def telemetry_broadcast_loop():
     while True:
         await asyncio.sleep(1.0)
         stats["uptime_sec"] = int(time.time() - start_time)
+        await poll_mcu_probe_once()
         if connected_ws_clients:
             msg = json.dumps({"type": "stats", "data": stats})
             for ws in list(connected_ws_clients):

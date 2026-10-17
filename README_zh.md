@@ -26,14 +26,15 @@
   * **MVRP (`0x88F5`)**：多重 VLAN 註冊協議，於 8 個外部交換埠間動態傳播與註冊 SR VLAN 成員資格。
   * **MMRP (`0x88F6`)**：多重 MAC 註冊協議，具備硬體入埠攔截 (`macFilter1`) 與 L2 訊框分流介面（狀態機保留為 Stub 預留；動態串流群播轉發由 MSRP Listener Ready 直接觸發 `fdb_update` 完成）。
   * **標準 MRP 申請者 / 註冊者 / LeaveAll 計時器**：完整實作 IEEE 802.1Q 狀態轉換表（`VO`, `VP`, `VN`, `AN`, `AA`, `QA`, `LA`, `AO`, `QO`, `AP`, `QP`, `LO` 與 `IN`, `LV`, `MT`），由確定性 FreeRTOS 軟體計時器池 (`os_timer`) 驅動。
-* **SJA1110 硬體管理訊框 (`0x8B8C`) 攔截與指定埠定向發送管線**：
-  * **入埠硬體攔截 (Ingress Trap)**：配置 SJA1110 `GeneralParametersTable` 雙組 MAC 濾波器（`macFilter0` = `01:80:C2:00:00:0E` 攔截 gPTP 與 MSRP；`macFilter1` = `01:80:C2:00:00:20` 搭配遮罩 `FF:FF:FF:FF:FF:FE` 同時攔截 MMRP `01:80:C2:00:00:20` 與 MVRP `01:80:C2:00:00:21`），自動附加含來源埠號 (`SwitchPortIdx 1..8`) 之 `0x8B8C` 標頭並上送內部 Host Port 0。
-  * **出埠定向注入 (Directed Egress TX)**：透過 `EthSwt_43_SJA11XX_SetMgmtInfo` 與 `EthSwt_43_SJA11XX_EthTxProcessFrame` 封裝 `0x8B8C` 管理標頭，將各埠獨立產生的 MRP PDU 精準由指定外部交換埠 (`SwitchPortIdx 1..8`) 發出，繞過一般 L2 廣播泛洪。
+* **SJA1110 硬體管理訊框 (`0x8B8C`) 與 `MAC_FLT` 攔截與指定埠定向發送管線**：
+  * **入埠硬體攔截與 ENET Hash Filter**：配置 SJA1110 `GeneralParametersTable` 雙組 MAC 濾波器（`macFilter0` = `01:80:C2:00:00:0E` 攔截 gPTP 與 MSRP；`macFilter1` = `01:80:C2:00:00:20` 搭配遮罩 `FF:FF:FF:FF:FF:FE` 同時攔截 MMRP `01:80:C2:00:00:20` 與 MVRP `01:80:C2:00:00:21`，並啟用 `sendFollowUpTs0 = TRUE`、`sendFollowUpTs1 = TRUE`），同時於 Cortex-M7 內部 ENET 硬體過濾器（`Eth_UpdatePhysAddrFilter`）註冊標準 IEEE 802.1Q 多播 MAC 與 SJA1110 `MAC_FLT` 依埠改寫之多播 MAC（`01:80:C2:0p:00:xx`, `p = 1..8`）。
+  * **入埠編號解析與單線自動重映射**：由 `EthSwt_43_SJA11XX_GetRxMgmtObject()` 或 SJA1110 `MAC_FLT` 目的 MAC 第 3 Byte（`raw_dst[3]`）解析入埠 `SwitchPortIdx`，並將 `eth->dst` 復原為標準多播位址交由 `mrp_process_packet()` 處理；內建 `SRP_CFG_SINGLE_CABLE_TALKER_REMAP` 支援單條網路線測試時自動將 `Port 4` 進入之 `Talker Advertise` 重映射至 `Port 1` 並持續刷新 SR Class A Domain。
+  * **出埠定向注入 (Directed Egress TX)**：透過 `EthSwt_43_SJA11XX_SetMgmtInfo` 與 `EthSwt_43_SJA11XX_EthTxProcessFrame` 封裝 `0x8B8C` 管理標頭並依邏輯埠填入專屬 Source MAC（`22:33:44:55:66:7p`），將各埠獨立產生的 MRP PDU 精準由指定外部交換埠 (`SwitchPortIdx 1..8`) 發出。
 * **IEEE 802.1Qav 信用整形器 (CBS / FQTSS) 硬體頻寬卸載**：當 MSRP 完成串流預留後，自動將核准之 `idle_slope` (bps) 透過 `Switch_Ip_SetCbsIdleSlope()` 與 `Switch_Ip_DisableCbs()` 寫入 SJA1110 硬體 CBS 整形器（共 16 組硬體整形通道）。
 * **動態 L2 TCAM 轉發表與硬體 VLAN 表卸載**：
   * 動態操作 SJA1110 內建 1024 筆容量之 L2 Address Lookup TCAM (`Switch_Ip_SearchL2EntryInTcam`, `Switch_Ip_UpdateTcamEntry`, `Switch_Ip_SJA11XX_setL2AddressLookupTableControl`)，將音視訊/控制串流精準轉發至已註冊 Listener 之實體連接埠。
   * 動態更新 SJA1110 硬體 VLAN 查找表 (`Switch_Ip_GetVlanLookupEntry`, `Switch_Ip_UpdateVlanLookupEntry`)，並自動維持內部 Host Port 0 之管理權限。
-* **雙分區安全升級架構 (Dual-Bank Bootloader)**：支援主引導分區搭配雙應用分區（Bank 1 綠燈 / Bank 2 黃燈），確保車規韌體更新失敗時具備自動回滾保護。
+* **雙分區安全升級架構 (Dual-Bank QSPI Bootloader)**：支援主引導分區搭配雙 256 KB 應用分區（`-bfsize="256000"`，雙分區映像檔 `501,696` bytes 完整適配板載 512 KB `ISSI IS25LQ040D` QSPI Flash；Bank 1 綠燈 / Bank 2 黃燈），確保車規韌體更新失敗時具備自動回滾保護。
 
 ---
 
@@ -44,22 +45,22 @@
 SJA1110 內部包含 1 個微控制器主機連接埠 (`Port 0`) 與 8 個外部乙太網交換埠 (`Port 1..8`)。在 `srp_stack` 網橋配置中，8 個外部交換埠與 GenAVB/TSN 邏輯埠號 (`logical_port 2..9`) 一對一映射：
 
 | SJA1110 硬體埠號 | GenAVB `logical_port` | SRP 網橋埠索引 | xMII 介面與速率 | 實體收發器 / 連接器 | TSN 網橋角色 |
-| :---: | :---: | :---: | :---: | :--- | :--- |
+| :---: | :---: | :---: | :--- | :--- | :--- |
 | **`PORT_0`** | `0` (Host EP) | N/A (內部 CPU) | Internal MII (`100M`) | 內部 Cortex-M7 主機 (`22:33:44:55:66:77`) | 控制平面攔截與注入 (`0x8B8C`) |
-| **`PORT_1`** | `2` | Bridge Port `0` | SGMII (`1000 Mbps`) | 外部 SGMII PHY / 連接器 | TSN 網橋埠 (gPTP + SRP + CBS) |
-| **`PORT_2`** | `3` | Bridge Port `1` | RGMII (`1000 Mbps`) | 外部 RGMII Gigabit PHY | TSN 網橋埠 (gPTP + SRP + CBS) |
-| **`PORT_3`** | `4` | Bridge Port `2` | SGMII (`100 Mbps`) | 外部 SGMII 連接埠 | TSN 網橋埠 (gPTP + SRP + CBS) |
-| **`PORT_4`** | `5` | Bridge Port `3` | SGMII (`1000 Mbps`) | **SW1 Port 4 SFP 光纖/電口模組座** (`1G`) | 主要測試與上行 TSN 連接埠 |
-| **`PORT_5`** | `6` | Bridge Port `4` | MII (`100 Mbps`) | 晶片內建 `100BASE-T1` 車規 PHY | 車載雙絞線 T1 網橋埠 |
-| **`PORT_6`** | `7` | Bridge Port `5` | MII (`100 Mbps`) | 晶片內建 `100BASE-T1` 車規 PHY | 車載雙絞線 T1 網橋埠 |
-| **`PORT_7`** | `8` | Bridge Port `6` | MII (`100 Mbps`) | 晶片內建 `100BASE-T1` 車規 PHY | 車載雙絞線 T1 網橋埠 |
-| **`PORT_8`** | `9` | Bridge Port `7` | MII (`100 Mbps`) | 晶片內建 `100BASE-T1` 車規 PHY | 車載雙絞線 T1 網橋埠 |
+| **`PORT_1`** | `2` | Bridge Port `0` | SGMII (`1000 Mbps`) | 板載 `TJA1121B` (`1000BASE-T1`) | TSN 網橋埠 (SRP + CBS) |
+| **`PORT_2`** | `3` | Bridge Port `1` | RGMII (`1000 Mbps`) | 板載 `TJA1121A` (`1000BASE-T1`) | TSN 網橋埠 (SRP + CBS) |
+| **`PORT_3`** | `4` | Bridge Port `2` | SGMII (`100 Mbps`) | 板載 `TJA1104B` (`100BASE-T1` Switch) | TSN 網橋埠 (SRP + CBS) |
+| **`PORT_4`** | `5` | Bridge Port `3` | SGMII (`1000 Mbps`) | **SW1 Port 4 SFP 光纖/電口模組座** (`1G`) | 主要測試與上行 TSN 連接埠 (gPTP + SRP + CBS) |
+| **`PORT_5`** | `6` | Bridge Port `4` | MII (`100 Mbps`) | 晶片內建 `100BASE-T1` 車規 PHY | 車載雙絞線 T1 網橋埠 (SRP + CBS) |
+| **`PORT_6`** | `7` | Bridge Port `5` | MII (`100 Mbps`) | 晶片內建 `100BASE-T1` 車規 PHY | 車載雙絞線 T1 網橋埠 (SRP + CBS) |
+| **`PORT_7`** | `8` | Bridge Port `6` | MII (`100 Mbps`) | 晶片內建 `100BASE-T1` 車規 PHY | 車載雙絞線 T1 網橋埠 (SRP + CBS) |
+| **`PORT_8`** | `9` | Bridge Port `7` | MII (`100 Mbps`) | 外部/擴充 MII 介面 (無內建 T1 PHY) | 擴充 MII 網橋埠 (SRP + CBS) |
 
 ### 評估板指撥開關與跳線配置 (`SJA1110-MGS-EVM`)
 
 | 硬體項目 | 設定位置 / 狀態 | 功能說明 |
 | :--- | :---: | :--- |
-| **指撥開關 `SW7`** | `ON` (其餘皆為 `OFF`) | 選擇 `SJA1110 BOOT_OPTION1` (由外部 SPI Flash 啟動) |
+| **指撥開關 `SW2`** | `SW2.6 = ON`, `SW2.7 = ON` (其餘 `OFF`) | 依 `UM12269` Table 2/3 選擇由外部 SPI Flash (NVM) 啟動 |
 | **跳線帽 (Jumpers)** | `J58: 1-2`, `J61: 1-2`, `J77: 1-2` | 電源、時脈與收發器路由設定（其餘未列出跳線保持開路） |
 | **除錯介面** | `J16` (10-pin Cortex Debug) | 連接 S32 Debug Probe / PEMicro / J-Link 進行燒錄與單步除錯 |
 | **SFP 上行測試埠** | `SW1 Port 4` (`PORT_4`) | 插入支援 1Gb/s 自動協商之 SFP 轉 RJ45 模組連接至測試 PC |
@@ -86,7 +87,7 @@ SJA1110 內部包含 1 個微控制器主機連接埠 (`Port 0`) 與 8 個外部
         │  │   (攔截 MMRP 0x88F6 與 MVRP 0x88F5)   │   │   (動態串流群播轉發埠遮罩)             │  │
         │  └───────────────────┬───────────────────┘   │ • 4096-VID 硬體 VLAN 查找表            │  │
         └──────────────────────┼───────────────────────┴───────────────────▲───────────────────────┘
-                               │ 內部 Host Port 0 (附加 0x8B8C 管理標頭)   │ SPI / APB Switch_Ip API
+                               │ 內部 Host Port 0 (0x8B8C / MAC_FLT)       │ SPI / APB Switch_Ip API
                                ▼                                           │
         ┌──────────────────────────────────────────────────────────────────┼───────────────────────┐
         │                   Arm® Cortex®-M7 @ 200 MHz (FreeRTOS + RTD)     │                       │
@@ -98,9 +99,9 @@ SJA1110 內部包含 1 個微控制器主機連接埠 (`Port 0`) 與 8 個外部
         │                 │ EtherType 0x88F7            │ EtherType 0x22EA / 0x88F5 / 0x88F6       │
         │                 ▼                             ▼                  │                       │
         │  ┌──────────────────────────┐   ┌─────────────────────────────┐  │                       │
-        │  │ gPTPTask (Prio 3, 2ms)   │   │ SRP_PORT_Periodic()         │  │                       │
+        │  │ gPTPTask (Prio 3, 5ms)   │   │ vSRP_Task (Prio 2, 10ms)    │  │                       │
         │  │ • IEEE 802.1AS GM/Bridge │   │ • MSRP 串流頻寬預留狀態機   ├──┘                       │
-        │  │ • Eth_Main 與 Eth_Poll   ├──►│ • MVRP 動態 VLAN 註冊狀態機 │                          │
+        │  │ • Eth_Main 與 Eth_Poll   │   │ • MVRP 動態 VLAN 註冊狀態機 │                          │
         │  │ • 硬體時間戳記校正       │   │ • FQTSS 頻寬計算與 CBS 觸發 │                          │
         │  └──────────────────────────┘   └─────────────────────────────┘                          │
         └──────────────────────────────────────────────────────────────────────────────────────────┘
@@ -111,9 +112,9 @@ SJA1110 內部包含 1 個微控制器主機連接埠 (`Port 0`) 與 8 個外部
 | 協議名稱 | IEEE 國際標準 | EtherType | 目的群播 MAC 位址 | SJA1110 硬體攔截規則 | FreeRTOS 處理任務 |
 | :--- | :--- | :---: | :---: | :--- | :--- |
 | **gPTP** | IEEE 802.1AS-2020 | `0x88F7` | `01:80:C2:00:00:0E` | `DPI Entry #0/#1` + `macFilter0` | `gPTPTask` (`GPTP_PORT_RxIndication`) |
-| **MSRP** | IEEE 802.1Qat / 802.1Q-2018 Cl. 35 | `0x22EA` | `01:80:C2:00:00:0E` | `macFilter0` (與 gPTP 共用目的 MAC) | `gPTPTask` (`g_srp_rx_ring` -> `SRP_PORT_Periodic`) |
-| **MVRP** | IEEE 802.1Q-2018 Cl. 11 | `0x88F5` | `01:80:C2:00:00:21` | `macFilter1` (`Mask: FF:FF:FF:FF:FF:FE`) | `gPTPTask` (`g_srp_rx_ring` -> `SRP_PORT_Periodic`) |
-| **MMRP** | IEEE 802.1Q-2018 Cl. 10 | `0x88F6` | `01:80:C2:00:00:20` | `macFilter1` (`Res : 01:80:C2:00:00:20`) | `gPTPTask` (`g_srp_rx_ring` -> `SRP_PORT_Periodic`) |
+| **MSRP** | IEEE 802.1Qat / 802.1Q-2018 Cl. 35 | `0x22EA` | `01:80:C2:00:00:0E` | `macFilter0` (與 gPTP 共用目的 MAC) | `vSRP_Task` (`g_srp_rx_ring` -> `SRP_PORT_Periodic`) |
+| **MVRP** | IEEE 802.1Q-2018 Cl. 11 | `0x88F5` | `01:80:C2:00:00:21` | `macFilter1` (`Mask: FF:FF:FF:FF:FF:FE`) | `vSRP_Task` (`g_srp_rx_ring` -> `SRP_PORT_Periodic`) |
+| **MMRP** | IEEE 802.1Q-2018 Cl. 10 | `0x88F6` | `01:80:C2:00:00:20` | `macFilter1` (`Res : 01:80:C2:00:00:20`) | `vSRP_Task` (`g_srp_rx_ring` -> `SRP_PORT_Periodic`) |
 
 ---
 
@@ -138,24 +139,25 @@ SJA1110 內部包含 1 個微控制器主機連接埠 (`Port 0`) 與 8 個外部
 - **網橋優先與架構可擴充性**：預設啟用 Bridge 模式 (`is_bridge = 1`)，同時完整保留 Endpoint 實例 (`msrp_ep` / `mvrp_ep`) 與 IPC 介面供 Milestone 5 擴充。
 
 #### Milestone 2：SJA1110 管理訊框 (`0x8B8C`) 攔截與指定埠收發管線 (`v1.0.1-m2`)
-- **雙通道硬體 MAC 濾波攔截 (`GeneralParametersTable`)**：
-  - `macFilter0` (`01:80:C2:00:00:0E`, 遮罩 `FF:FF:FF:FF:FF:FF`)：同時攔截 IEEE 802.1AS gPTP (`0x88F7`) 與 IEEE 802.1Qat MSRP (`0x22EA`) 訊框並上送內部 Host Port 0。
-  - `macFilter1` (`01:80:C2:00:00:20`, 遮罩 `FF:FF:FF:FF:FF:FE`, `sendFollowUpTs1 = FALSE`)：利用最低位元遮罩同時攔截 IEEE 802.1Q MMRP (`01:80:C2:00:00:20`, `0x88F6`) 與 MVRP (`01:80:C2:00:00:21`, `0x88F5`) 訊框並附上來源 `SwitchPortIdx` 標頭。
-- **零干擾 RX 多工分流 (`EthIf_RxIndication`)**：維持 `0x88F7` 直接進入 `GPTP_MsgReceive()` 零延遲路徑，並將 `0x22EA` / `0x88F5` / `0x88F6` 轉換為 `logical_port = SwitchPortIdx + 1` 送入 `g_srp_rx_ring` 環形佇列。
-- **指定實體埠定向發送 (`net_tx`)**：串接 `Eth_ProvideTxBuffer` $\to$ `EthSwt_43_SJA11XX_SetMgmtInfo` $\to$ `EthSwt_43_SJA11XX_EthTxProcessFrame` $\to$ `Eth_Transmit` $\to$ `Eth_TxConfirmation`，確保在單一 TX Buffer Descriptor (`BufferCount = 1U`) 配置下發送後立即釋放緩衝區。
+- **雙通道硬體 MAC 濾波攔截 (`GeneralParametersTable`) 與 ENET Hash Filter**：
+  - `macFilter0` (`01:80:C2:00:00:0E`, 遮罩 `FF:FF:FF:FF:FF:FF`, `sendFollowUpTs0 = TRUE`)：同時攔截 IEEE 802.1AS gPTP (`0x88F7`) 與 IEEE 802.1Qat MSRP (`0x22EA`) 訊框並上送內部 Host Port 0。
+  - `macFilter1` (`01:80:C2:00:00:20`, 遮罩 `FF:FF:FF:FF:FF:FE`, `sendFollowUpTs1 = TRUE`)：利用最低位元遮罩同時攔截 IEEE 802.1Q MMRP (`01:80:C2:00:00:20`, `0x88F6`) 與 MVRP (`01:80:C2:00:00:21`, `0x88F5`) 訊框，並於 Cortex-M7 ENET MAC 過濾器註冊 `01:80:C2:0p:00:xx` (`p = 1..8`)。
+- **零干擾 RX 多工分流 (`SRP_PORT_RxIndication`)**：快速過濾 `0x22EA` / `0x88F5` / `0x88F6`（含 802.1Q VLAN Tag `0x8100` 訊框）轉換為 `logical_port = SwitchPortIdx + 1` 送入 `g_srp_rx_ring`，保留 `0x88F7` 交由 `GPTP_PORT_RxIndication()` 處理。
+- **指定實體埠定向發送 (`net_tx`)**：串接 `Eth_ProvideTxBuffer` $\to$ `EthSwt_43_SJA11XX_SetMgmtInfo` $\to$ `EthSwt_43_SJA11XX_EthTxProcessFrame` $\to$ `Eth_Transmit` $\to$ `Eth_TxConfirmation`，自動填入各埠專屬 Source MAC (`22:33:44:55:66:7p`) 並透過 Mutex 保護單一 TX Buffer Descriptor。
 
 #### Milestone 3：交換機硬體卸載整合 (CBS 整形器、L2 TCAM 與 VLAN 表) (`v1.0.2-m3`)
-- **IEEE 802.1Qav 信用整形器 (CBS) 硬體卸載**：將 `fqtss.c` 之 `clock_st_psfp_cbs_config()` 對接至 SJA1110 驅動；當 `idle_slope > 0` 時呼叫 `Switch_Ip_SetCbsIdleSlope(0U, swt_port, tc, idle_slope)`，當 `idle_slope == 0` 時呼叫 `Switch_Ip_DisableCbs(0U, swt_port, tc)` 釋放硬體整形器。
+- **IEEE 802.1Qav 信用整形器 (CBS) 硬體卸載**：將 `fqtss_set_oper_idle_slope()` 對接至 SJA1110 驅動；當 `idle_slope > 0` 時呼叫 `Switch_Ip_SetCbsIdleSlope(0U, swt_port, tc, idle_slope)`，當 `idle_slope == 0` 時呼叫 `Switch_Ip_DisableCbs(0U, swt_port, tc)` 釋放硬體整形器。
 - **1024 筆 L2 TCAM 動態群播過濾**：將 `fdb_update()` / `fdb_delete()` 對接至 `Switch_Ip_SearchL2EntryInTcam()` 與 `Switch_Ip_UpdateTcamEntry()`，將 GenAVB `logical_port` 狀態映射為硬體 `SwitchPortIdx` 轉發遮罩 (`destPorts`)，防止未預留頻寬埠口遭串流泛洪。
 - **4096-VID 硬體 VLAN 查找表卸載**：將 `vlan_update()` / `vlan_delete()` 對接至 `Switch_Ip_GetVlanLookupEntry()` 與 `Switch_Ip_UpdateVlanLookupEntry()`，動態更新各埠 `vlanDomain` 與 `tagPort` 並確保 `Switch_Ip_Port0` (Host CPU) 維持成員權限。
 
 #### Milestone 4：FreeRTOS 雙協議棧共整合、建置與實機驗證 (`v1.0.3-m4`)
-- **確定性協同多任務排程**：
-  - `gPTPTask` (`Priority 3`, 2 ms 週期, `2048` words 堆疊)：於單一任務迴圈內依序協同執行 `GPTP_TimerPeriodic()`、`Eth_Main()`、`Eth_Poll()`、`SRP_PORT_Periodic()` 與 `FLASH_Write_Poll()`，徹底避免單一 ENET TX Buffer Descriptor (`ringSize = 1U`) 與 `Switch_Ip` 硬體存取之跨執行緒鎖競爭。
-  - `gpioHandleTask` (`Priority 2`, 20 ms 週期)：定期輪詢 SJA1110 板載 PHY、SFP、PMIC 與按鍵 GPIO 中斷旗標。
-  - `aliveLEDTimer` (`Priority 3`, 500 ms FreeRTOS 軟體計時器, `512` words 計時器任務堆疊)：定期翻轉板載 Alive LED 指示燈。
+- **確定性多任務分層排程**：
+  - `gPTPTask` (`Priority 3`, 5 ms 週期)：專責執行高優先級 `Eth_Main()`、`Eth_Poll()` 與 `GPTP_TimerPeriodic()`。
+  - `vSRP_Task` (`Priority 2`, 10 ms 週期)：執行 `SRP_PORT_Periodic()`（MRP RX 佇列派發、軟體計時器、鏈路狀態輪詢與遙測快照更新）及板載按鍵掃描。
+  - `NVM_Write_Task` (`Priority 1`, 100 ms 週期)：執行 `FLASH_Write_Poll()`，內建 `0.1 ppm` 死區與 `30 秒` 節流保護外部 QSPI Flash 壽命。
+  - `aliveLEDTimer` (`Priority 3`, 500 ms FreeRTOS 軟體計時器)：定期翻轉板載 Alive LED 指示燈。
 - **RTOS 資源擴充**：於 `FreeRTOSConfig.h` 將 `configTOTAL_HEAP_SIZE` 擴充至 `49152` (48 KB，搭配支援記憶體釋放合併之 `heap_4` 分配器)，並啟用 `configUSE_TIMERS = 1`。
-- **實機編譯與 Wireshark 封包驗收**：完成 S32DS GCC 零錯誤編譯、Dual-Bank SPI NVM 映像檔產出，並於 `SW1 Port 4` (1G SFP) 驗證 gPTP 與 MSRP/MVRP 控制訊框同步收發。
+- **實機編譯與 Wireshark 封包驗收**：完成 S32DS GCC 零錯誤編譯、Dual-Bank SPI NVM 映像檔產出（256 KB 分區，共 `501,696` bytes），並於 `SW1 Port 4` (1G SFP) 驗證 gPTP 與 MSRP/MVRP 控制訊框同步收發與硬體卸載。
 
 #### Milestone 5：TSN Endpoint 端點模式 (`is_bridge = 0`) 與本地 IPC 擴充 (`v1.1.0-m5`)
 - **內部主機端點串流宣告**：啟用預留之 `msrp_ep` / `mvrp_ep` 狀態機實例，將 `ipc_tx()` / `ipc_rx()` 對接至 FreeRTOS Message Queue，支援 Cortex-M7 本地端應用任務直接發起 Talker Advertise 或 Listener Ready 宣告。
@@ -168,6 +170,10 @@ SJA1110 內部包含 1 個微控制器主機連接埠 (`Port 0`) 與 8 個外部
 .
 ├── board/                              # SJA1110 硬體接腳、交換矩陣靜態配置與板級驅動
 ├── FreeRTOS/                           # FreeRTOS v11.1.0 核心、heap_4 記憶體管理與 Cortex-M7 移植層
+├── freemaster/                         # FreeMASTER 專案與即時 WebSocket/Wireshark 遙測儀表板
+│   ├── sja1110_freemaster.fmcfg        # 自動同步 ELF 符號位址之 FreeMASTER 設定檔
+│   ├── telemetry_bridge.py             # 整合 JTAG/pyOCD 與 Scapy Wireshark 之 WebSocket 遙測伺服器
+│   └── web/index.html                  # 即時 TSN 與 Wireshark 互動式 Web 儀表板
 ├── generate/                           # S32 Configuration Tools (MEX) 產生之 RTD 配置檔
 │   └── include/FreeRTOSConfig.h        # FreeRTOS 排程器、Heap (48 KB) 與軟體計時器配置
 ├── gptp_stack/                         # IEEE 802.1AS gPTP 高精度時間同步協議棧
@@ -177,33 +183,37 @@ SJA1110 內部包含 1 個微控制器主機連接埠 (`Port 0`) 與 8 個外部
 ├── Project_Settings/                   # 鏈結腳本 (Flash/RAM)、啟動代碼、除錯器設定
 ├── RTD/                                # NXP Real Time Drivers (Eth, EthSwt, Switch_Ip, Spi, Gpt)
 ├── src/                                # 主程式與系統整合原始碼
-│   ├── main.c                          # Dual-bank 啟動檢查、NVM 快取、FreeRTOS 任務建立 (gPTPTask, gpioHandleTask)
+│   ├── main.c                          # Dual-bank 啟動檢查、NVM 快取、FreeRTOS 任務 (gPTPTask, vSRP_Task, NVM_Write_Task)
 │   ├── EthIf.c                         # 0x8B8C 交換機管理訊框分流器 (gPTP + MSRP/MVRP/MMRP)
-│   ├── example_init.c                  # SJA1110 交換機與 PHY 初始化、中斷處理與 RGB LED 控制
+│   ├── example_init.c                  # SJA1110 交換機與 PHY 初始化、Mutex 保護與 RGB LED 控制
 │   └── gptp_cbk.c                      # gPTP Domain 選擇、時間同步與時鐘更新回呼函式
 ├── srp_stack/                          # IEEE 802.1Qat 串流預留協議棧 (SRP Stack)
 │   ├── common/                         # FQTSS 頻寬核算、計時器池、SR Class 與 QoS 定義
 │   │   ├── fqtss.c                     # Credit-Based Shaper (CBS) 頻寬累加與硬體卸載觸發
 │   │   ├── sr_class.c                  # SR Class A (8 kHz) 與 Class B (4 kHz) 參數定義
 │   │   ├── srp.c                       # SRP 協議 PDU 結構定義
-│   │   └── timer.c                     # 封裝 FreeRTOS xTimer 之通用計時器管理層
+│   │   └── timer.c                     # 封裝確定性軟體計時器池 (os_timer / g_srp_timers) 之計時器管理層
 │   ├── include/                        # GenAVB/TSN 公用標頭檔與 FreeRTOS OSAL 轉接層
 │   │   ├── genavb/                     # 公用 API 標頭檔 (config.h, srp.h, fdb.h, vlan.h, qos.h)
 │   │   ├── common/                     # 協議棧內部標頭檔 (fqtss.h, timer.h, managed_objects.h)
 │   │   ├── os/                         # 作業系統抽象層 (stdlib.h, clock.h, timer.h, net.h)
 │   │   └── osal/                       # 系統型別與編譯器屬性定義 (sys_types.h)
 │   ├── port/                           # SJA1110 硬體抽象與轉接層
-│   │   ├── srp_port.h                  # SJA1110 SRP Bridge 介面與 RX 訊框佇列結構
-│   │   └── srp_port.c                  # 0x8B8C 定向收發、CBS 卸載、L2 TCAM FDB、VLAN 與 FreeRTOS 任務
+│   │   ├── srp_port.h                  # SJA1110 SRP Bridge 介面與 MCU 遙測結構體
+│   │   └── srp_port.c                  # 0x8B8C/MAC_FLT 收發、CBS 卸載、L2 TCAM FDB、VLAN 與自檢函式
 │   └── srp/                            # IEEE 802.1Q MRP / MSRP / MVRP / MMRP 核心狀態機
 │       ├── mrp.c                       # MRP Applicant、Registrar 與 LeaveAll 通用狀態機
 │       ├── msrp.c                      # IEEE 802.1Qat MSRP Talker/Listener/Bridge 處理邏輯
 │       ├── mvrp.c                      # IEEE 802.1Q MVRP 動態 VLAN 註冊狀態機
 │       ├── mmrp.c                      # IEEE 802.1Q MMRP 動態 MAC 註冊狀態機
-│       └── srp_entry.c                 # 頂層 srp_init() 與 srp_exit() 入口函式
-├── tool/                               # Dual-Bank Flash 與 SPI NVM 映像檔後處理腳本
+│       └── srp_entry.h                 # 頂層 srp_init() 與 srp_exit() 入口宣告標頭檔
+├── tool/                               # Dual-Bank Flash、符號同步與自動化 TSN 驗證腳本
 │   ├── createDBImage.py                # 產出雙分區應用韌體映像檔
-│   └── createNvmImage.py               # 產出 SJA1110 SPI NVM 開機映像檔
+│   ├── createNvmImage.py               # 產出 SJA1110 SPI NVM 開機映像檔
+│   ├── flash_makefile.targets          # 建置後雙分區 QSPI Flash ELF 產生規則 (-bfsize=256000)
+│   ├── fix_s32ds_cproject_paths.py     # 將 .cproject 絕對路徑正規化為可攜式相對路徑
+│   ├── sync_freemaster_symbols.py      # 自動由 ELF 解析變數實際位址並同步至 freemaster/*.fmcfg
+│   └── test_sja1110_srp.py             # 自動化 Scapy 雙向閉迴路 gPTP + MVRP + MSRP 驗證腳本
 ├── SJA1110-MGS_gPTP_FreeRTOS.mex       # S32 Configuration Tools 硬體外設專案檔
 ├── README.md                           # 英文技術規格書與說明文件
 └── README_zh.md                        # 繁體中文技術規格書與說明文件
@@ -223,11 +233,11 @@ SJA1110 內部包含 1 個微控制器主機連接埠 (`Port 0`) 與 8 個外部
 ### 方式 A：透過命令列建置 (Headless GNU Make)
 ```powershell
 # 1. 設定 S32DS 建置工具與 ARM GCC 編譯器環境變數
-$env:PATH = "C:\NXP\S32DS.3.6.11\S32DS\build_tools\msys32\usr\bin;C:\NXP\S32DS.3.6.11\S32DS\build_tools\gcc_v9.2\gcc-9.2-arm32-eabi\bin;" + $env:PATH
+$env:PATH = "C:\NXP\S32DS.3.6.11\eclipse\plugins\com.nxp.s32ds.build.tools.msys32_1.0.0.202307180758\msys32\usr\bin;C:\NXP\S32DS.3.6.11\S32DS\build_tools\gcc_v9.2\gcc-9.2-arm32-eabi\bin;" + $env:PATH
 
-# 2. 進入 Debug_FLASH 或 Debug_RAM 目錄執行編譯
-cd Debug_FLASH
-make -j8 all
+# 2. 編譯 Debug_FLASH ELF 與雙分區 QSPI Flash 映像檔 (app_flash.elf) 並同步 FreeMASTER 符號位址
+make -C Debug_FLASH -j8 user_all CWD=.
+python tool/sync_freemaster_symbols.py --elf Debug_FLASH/SJA1110_MGS_gPTP_FreeRTOS.elf
 ```
 
 ### 方式 B：透過 S32 Design Studio IDE 建置與除錯
@@ -242,8 +252,8 @@ make -j8 all
 
 > [!NOTE]
 > **實機測試進度（T1 ~ T5 全面通過）**：
-> - **情境一（單板 JTAG，里程碑 T1–T3）**：已於 `SJA1110-MGS-EVM` 目標板 **100% 驗證通過 (PASS)**！實測 FreeRTOS `heap_4` 剩餘 19.5 KB 零洩漏、8 埠 SRP Bridge 正常排程運作、MVRP VID 2 表項、L2 TCAM 串流轉發、IEEE 802.1Qav CBS 硬體頻寬整形器寫入全數成功。
-> - **情境二（雙向網路線，里程碑 T4–T5）**：透過 `SW1 Port 4` 連接至 PC 實體網卡，**100% 實機驗證通過 (PASS)**！成功捕捉 80 組 gPTP Sync/Follow_Up（125ms 週期）、10 組 Pdelay_Req/Resp 雙向對鎖收斂（<150ns 延遲）、SJA1110 `0x8B8C` 管理標頭零洩漏，以及 MSRP 週期性 LeaveAll 與雙向 MVRP/MSRP 注入閉迴路。
+> - **情境一（單板 JTAG，里程碑 T1–T3）**：已於 `SJA1110-MGS-EVM` 目標板 **100% 驗證通過 (PASS)**！實測 FreeRTOS `heap_4` 剩餘 `13,064` Bytes（`60` 次配置 / `16` 次釋放，零洩漏）、8 埠 SRP Bridge 正常排程運作（`g_srp_bridge_ctx = 0x20007dd0`）、開機初始硬體表項乾淨（`active_vlan_id = 0`），且觸發 `g_srp_run_selftest = 1` 完整狀態機自測後，MVRP `VID = 2` 表項、L2 TCAM 串流轉發（`91:E0:F0:00:FE:00`, `dest_ports = 16`, `tcam_index = 16`）、IEEE 802.1Qav CBS 硬體頻寬整形器（`oper_idle_slope = 10,944,000` bps）寫入全數成功。
+> - **情境二（雙向網路線，里程碑 T4–T5）**：透過 `SW1 Port 4` 連接至 PC 實體網卡，**100% 實機驗證通過 (PASS)**！成功捕捉 `80+` 組 gPTP Sync/Follow_Up（125 ms 週期）、`10` 組 Pdelay_Req/Resp 雙向對鎖收斂、SJA1110 `0x8B8C` 管理標頭零洩漏、捕捉 EVB `Port 4` 主動發出之 `MSRP Talker Advertise`（`src = 22:33:44:55:66:75`）與 `LeaveAll`，並於測試完成時經由 GDB 確認線上封包已觸發 MCU 內部動態 VLAN（`active_vlan_id = 2`）、L2 TCAM（`active_tcam_dest_ports = 16`）與 Port 4 CBS 整形斜率（`port4_cbs_slope_bps = 10,944,000` bps，`rx_mrp_packets = 24, tx_mrp_packets = 37`）。
 >
 > 詳細步驟、GDB 監看變數、實機測試數據，請參閱完整的 **[自我測試計畫 (TEST_PLAN_zh.md)](TEST_PLAN_zh.md)** ([English Test Plan](TEST_PLAN.md))。
 
@@ -257,8 +267,8 @@ make -j8 all
    * **IEEE 802.1Qat MSRP (`0x22EA`, 目的 MAC `01:80:C2:00:00:0E`)**：SR Class A (Priority 3 / VID 2) 與 SR Class B (Priority 2 / VID 2) 之 `Domain` 屬性宣告、週期性 `LeaveAll` 事件，以及跨交換埠 (`Port 1..8`) 之 `Talker Advertise` / `Listener Ready` 串流預留屬性傳播。
    * **IEEE 802.1Q MVRP (`0x88F5`, 目的 MAC `01:80:C2:00:00:21`)**：動態 VLAN 註冊與 LeaveAll 宣告訊框。
 4. **板載 LED 狀態指示**：
-   * **Alive LED**：由 `Eth_Task` 週期性閃爍，指示 FreeRTOS 排程器與交換機輪詢正常運作。
-   * **RGB LED**：每當配置埠發送訊框時閃爍 **綠燈**（由 Bank 1 正常啟動）或 **黃燈**（由備援 Bank 2 啟動）。
+   * **Alive LED**：由 FreeRTOS 軟體計時器 `aliveLEDTimer` (`toggleAliveLED`, 500 ms) 週期性翻轉，指示排程器正常運作。
+   * **RGB LED**：開機時顯示 **綠燈**（由 Bank 1 啟動）、**黃燈**（由備援 Bank 2 啟動或 PMIC 中斷）或 **紅燈**（啟動錯誤）；按下 `BUTTON1` 觸發自測時轉為 **紫燈 (Magenta)**，按下 `BUTTON2` 時轉為 **青燈 (Cyan)**。
 
 ---
 

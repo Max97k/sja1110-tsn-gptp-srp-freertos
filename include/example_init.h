@@ -115,6 +115,8 @@ typedef enum
 Std_ReturnType SJA1110_DeviceInit(void);
 Std_ReturnType SJA1110_PinsInit(void);
 void SJA1110_SetRGBLed(sja1110_ledColor ledColor);
+void SJA1110_LockSwitch(void);
+void SJA1110_UnlockSwitch(void);
 void HandlePhyInterrupts(uint32 gpioFlags);
 void HandlePeripheralInterrupts(uint32 gpioFlags);
 void HandleButtonInterrupts(uint32 gpioFlags);

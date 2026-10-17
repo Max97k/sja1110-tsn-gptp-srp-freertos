@@ -6,45 +6,129 @@
   "variables": [
     {
       "name": "sbGptpInitialized",
-      "addr": 536956365,
+      "addr": 536956465,
       "type": "uint",
       "size": 1
     },
     {
       "name": "xFreeBytesRemaining",
-      "addr": 536902908,
+      "addr": 536903004,
+      "type": "uint",
+      "size": 4
+    },
+    {
+      "name": "xMinimumEverFreeBytesRemaining",
+      "addr": 536903000,
       "type": "uint",
       "size": 4
     },
     {
       "name": "g_srp_selftest_done",
-      "addr": 536964944,
+      "addr": 536965073,
       "type": "uint",
       "size": 1
     },
     {
       "name": "g_srp_selftest_vlan_res",
-      "addr": 536901836,
+      "addr": 536901932,
       "type": "int",
       "size": 4
     },
     {
       "name": "g_srp_selftest_fdb_res",
-      "addr": 536901840,
+      "addr": 536901936,
       "type": "int",
       "size": 4
     },
     {
       "name": "g_srp_selftest_cbs_res",
-      "addr": 536901844,
+      "addr": 536901940,
       "type": "int",
       "size": 4
     },
     {
       "name": "g_srp_run_selftest",
-      "addr": 536964945,
+      "addr": 536965116,
       "type": "uint",
       "size": 1
+    },
+    {
+      "name": "g_srp_telemetry",
+      "addr": 536965076,
+      "type": "uint",
+      "size": 40
+    },
+    {
+      "name": "g_srp_telemetry.magic",
+      "addr": 536965076,
+      "type": "uint",
+      "size": 4
+    },
+    {
+      "name": "g_srp_telemetry.uptime_ticks",
+      "addr": 536965080,
+      "type": "uint",
+      "size": 4
+    },
+    {
+      "name": "g_srp_telemetry.free_heap_bytes",
+      "addr": 536965084,
+      "type": "uint",
+      "size": 4
+    },
+    {
+      "name": "g_srp_telemetry.min_free_heap_bytes",
+      "addr": 536965088,
+      "type": "uint",
+      "size": 4
+    },
+    {
+      "name": "g_srp_telemetry.port_link_mask",
+      "addr": 536965092,
+      "type": "uint",
+      "size": 1
+    },
+    {
+      "name": "g_srp_telemetry.selftest_done",
+      "addr": 536965093,
+      "type": "uint",
+      "size": 1
+    },
+    {
+      "name": "g_srp_telemetry.active_vlan_id",
+      "addr": 536965094,
+      "type": "uint",
+      "size": 2
+    },
+    {
+      "name": "g_srp_telemetry.active_tcam_dest_ports",
+      "addr": 536965096,
+      "type": "uint",
+      "size": 2
+    },
+    {
+      "name": "g_srp_telemetry.active_tcam_mac",
+      "addr": 536965098,
+      "type": "uint",
+      "size": 6
+    },
+    {
+      "name": "g_srp_telemetry.port4_cbs_slope_bps",
+      "addr": 536965104,
+      "type": "uint",
+      "size": 4
+    },
+    {
+      "name": "g_srp_telemetry.rx_mrp_packets",
+      "addr": 536965108,
+      "type": "uint",
+      "size": 4
+    },
+    {
+      "name": "g_srp_telemetry.tx_mrp_packets",
+      "addr": 536965112,
+      "type": "uint",
+      "size": 4
     }
   ]
 }

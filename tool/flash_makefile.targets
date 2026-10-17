@@ -25,7 +25,7 @@ updateBin: generateBin
 # The first image is placed at offset (bfaddr) and the second image (backup) is placed at offset (bfaddr + bfsize)
 dualbankBin: updateBin
 	@echo Running dual bank image generation script from: "$(DBSCRIPT_PATH)"
-	@py.exe "$(DBSCRIPT_PATH)" -bf="${CWD}/flash_image.bin" -bfsize="400000" -bfaddr="24"
+	@py.exe "$(DBSCRIPT_PATH)" -bf="${CWD}/flash_image.bin" -bfsize="256000" -bfaddr="24"
 
 binToElf: dualbankBin
 	arm-none-eabi-objcopy.exe --input-target=binary --output-target=elf32-little --change-addresses=0x41000000 flash_image.bin app_flash.elf

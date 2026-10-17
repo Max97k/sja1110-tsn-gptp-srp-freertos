@@ -26,14 +26,15 @@ This project integrates the **NXP IEEE 802.1AS gPTP Precision Time Synchronizati
   * **MVRP (`0x88F5`)**: Multiple VLAN Registration Protocol dynamically propagating and registering SR VLAN memberships across all 8 external bridge ports.
   * **MMRP (`0x88F6`)**: Multiple MAC Registration Protocol hardware ingress trapping (`macFilter1`) and L2 frame demultiplexing hooks (state machine stubbed; dynamic stream multicast pruning is driven directly by MSRP Listener Ready via `fdb_update`).
   * **MRP Applicant / Registrar / LeaveAll Timers**: Full IEEE 802.1Q state tables (`VO`, `VP`, `VN`, `AN`, `AA`, `QA`, `LA`, `AO`, `QO`, `AP`, `QP`, `LO` and `IN`, `LV`, `MT`) driven by a deterministic FreeRTOS software timer pool (`os_timer`).
-* **SJA1110 Hardware Management Frame (`0x8B8C`) Trap & Directed TX Pipeline**:
-  * **Ingress Trapping**: Uses SJA1110 `GeneralParametersTable` dual MAC filters (`macFilter0` = `01:80:C2:00:00:0E` for gPTP/MSRP; `macFilter1` = `01:80:C2:00:00:20` with mask `FF:FF:FF:FF:FF:FE` for MMRP `01:80:C2:00:00:20` and MVRP `01:80:C2:00:00:21`) to trap link-local control frames to internal Host Port 0 with ingress `SwitchPortIdx` metadata.
-  * **Directed Egress Injection**: Uses `EthSwt_43_SJA11XX_SetMgmtInfo` and `EthSwt_43_SJA11XX_EthTxProcessFrame` to inject MRP PDUs out of exact target physical ports (`SwitchPortIdx 1..8`) bypassing normal L2 forwarding.
+* **SJA1110 Hardware Management Frame (`0x8B8C`) & `MAC_FLT` Trap + Directed TX Pipeline**:
+  * **Ingress Trapping & ENET Hash Filter**: Uses SJA1110 `GeneralParametersTable` dual MAC filters (`macFilter0` = `01:80:C2:00:00:0E` for gPTP/MSRP; `macFilter1` = `01:80:C2:00:00:20` with mask `FF:FF:FF:FF:FF:FE` for MMRP `01:80:C2:00:00:20` and MVRP `01:80:C2:00:00:21`, with `sendFollowUpTs0 = TRUE` and `sendFollowUpTs1 = TRUE`) and registers both canonical IEEE 802.1Q multicast MACs and SJA1110 `MAC_FLT` port-tagged variants (`01:80:C2:0p:00:xx`, `p = 1..8`) in the Cortex-M7 ENET hardware hash filter (`Eth_UpdatePhysAddrFilter`).
+  * **Ingress Port Extraction & Single-Cable Remap**: Extracts ingress `SwitchPortIdx` from `EthSwt_43_SJA11XX_GetRxMgmtObject()` or byte 3 (`raw_dst[3]`) of the SJA1110 `MAC_FLT` destination MAC while restoring canonical multicast DA (`eth->dst`) for `mrp_process_packet()`. Supports `SRP_CFG_SINGLE_CABLE_TALKER_REMAP` to automatically remap incoming `Talker Advertise` on `Port 4` to `Port 1` with SR Class A Domain refresh when testing over a single Ethernet cable.
+  * **Directed Egress Injection**: Uses `EthSwt_43_SJA11XX_SetMgmtInfo` and `EthSwt_43_SJA11XX_EthTxProcessFrame` with per-port source MAC population (`22:33:44:55:66:7p`) to inject MRP PDUs out of exact target physical ports (`SwitchPortIdx 1..8`) bypassing normal L2 forwarding.
 * **IEEE 802.1Qav Credit-Based Shaper (CBS / FQTSS) Hardware Offload**: Real-time translation of MSRP reserved stream bandwidth (`idle_slope` in bps) into SJA1110 hardware CBS shapers via `Switch_Ip_SetCbsIdleSlope()` and `Switch_Ip_DisableCbs()` across 16 hardware shapers.
 * **Dynamic L2 TCAM FDB & Hardware VLAN Offload**:
   * Programs SJA1110's 1024-entry L2 Address Lookup TCAM (`Switch_Ip_SearchL2EntryInTcam`, `Switch_Ip_UpdateTcamEntry`, `Switch_Ip_SJA11XX_setL2AddressLookupTableControl`) to prune stream multicast traffic strictly to ports with active Listener registrations.
   * Updates SJA1110's Hardware VLAN Lookup Table (`Switch_Ip_GetVlanLookupEntry`, `Switch_Ip_UpdateVlanLookupEntry`) while preserving internal Host Port 0 management access.
-* **Dual-Bank Fail-Safe Flash Bootloader Architecture**: Supports primary bootloader partition with dual application banks (Bank 1 Green LED / Bank 2 Yellow LED) for atomic firmware updates and automatic rollback protection.
+* **Dual-Bank Fail-Safe QSPI Flash Bootloader Architecture**: Supports primary bootloader partition with dual 256 KB application banks (`-bfsize="256000"`, `501,696`-byte dual-bank image fitting inside the 512 KB `ISSI IS25LQ040D` QSPI Flash; Bank 1 Green LED / Bank 2 Yellow LED) for atomic firmware updates and automatic rollback protection.
 
 ---
 
@@ -44,22 +45,22 @@ This project integrates the **NXP IEEE 802.1AS gPTP Precision Time Synchronizati
 The SJA1110 integrates 1 internal Microcontroller Host Port (`Port 0`) and 8 external Ethernet Switch Ports (`Port 1..8`). In `srp_stack`, the 8 external switch ports map 1-to-1 to GenAVB/TSN Bridge Logical Ports `2..9`:
 
 | SJA1110 Switch Port | GenAVB `logical_port` | SRP Bridge Port Index | xMII Interface & Speed | Physical Transceiver / Connector | Role in TSN Bridge |
-| :---: | :---: | :---: | :---: | :--- | :--- |
+| :---: | :---: | :---: | :--- | :--- | :--- |
 | **`PORT_0`** | `0` (Host EP) | N/A (Internal CPU) | Internal MII (`100M`) | Internal Cortex-M7 Host (`22:33:44:55:66:77`) | Control Plane Trap/Inject (`0x8B8C`) |
-| **`PORT_1`** | `2` | Bridge Port `0` | SGMII (`1000 Mbps`) | External SGMII PHY / Connector | TSN Bridge Port (gPTP + SRP + CBS) |
-| **`PORT_2`** | `3` | Bridge Port `1` | RGMII (`1000 Mbps`) | External RGMII Gigabit PHY | TSN Bridge Port (gPTP + SRP + CBS) |
-| **`PORT_3`** | `4` | Bridge Port `2` | SGMII (`100 Mbps`) | External SGMII Port | TSN Bridge Port (gPTP + SRP + CBS) |
-| **`PORT_4`** | `5` | Bridge Port `3` | SGMII (`1000 Mbps`) | **SW1 Port 4 SFP Cage** (`1G SFP`) | Primary Test & Uplink TSN Port |
-| **`PORT_5`** | `6` | Bridge Port `4` | MII (`100 Mbps`) | Integrated `100BASE-T1` PHY | Automotive T1 Bridge Port |
-| **`PORT_6`** | `7` | Bridge Port `5` | MII (`100 Mbps`) | Integrated `100BASE-T1` PHY | Automotive T1 Bridge Port |
-| **`PORT_7`** | `8` | Bridge Port `6` | MII (`100 Mbps`) | Integrated `100BASE-T1` PHY | Automotive T1 Bridge Port |
-| **`PORT_8`** | `9` | Bridge Port `7` | MII (`100 Mbps`) | Integrated `100BASE-T1` PHY | Automotive T1 Bridge Port |
+| **`PORT_1`** | `2` | Bridge Port `0` | SGMII (`1000 Mbps`) | Onboard `TJA1121B` (`1000BASE-T1`) | TSN Bridge Port (SRP + CBS) |
+| **`PORT_2`** | `3` | Bridge Port `1` | RGMII (`1000 Mbps`) | Onboard `TJA1121A` (`1000BASE-T1`) | TSN Bridge Port (SRP + CBS) |
+| **`PORT_3`** | `4` | Bridge Port `2` | SGMII (`100 Mbps`) | Onboard `TJA1104B` (`100BASE-T1` Switch) | TSN Bridge Port (SRP + CBS) |
+| **`PORT_4`** | `5` | Bridge Port `3` | SGMII (`1000 Mbps`) | **SW1 Port 4 SFP Cage** (`1G SFP`) | Primary Test & Uplink TSN Port (gPTP + SRP + CBS) |
+| **`PORT_5`** | `6` | Bridge Port `4` | MII (`100 Mbps`) | Integrated `100BASE-T1` PHY | Automotive T1 Bridge Port (SRP + CBS) |
+| **`PORT_6`** | `7` | Bridge Port `5` | MII (`100 Mbps`) | Integrated `100BASE-T1` PHY | Automotive T1 Bridge Port (SRP + CBS) |
+| **`PORT_7`** | `8` | Bridge Port `6` | MII (`100 Mbps`) | Integrated `100BASE-T1` PHY | Automotive T1 Bridge Port (SRP + CBS) |
+| **`PORT_8`** | `9` | Bridge Port `7` | MII (`100 Mbps`) | External/Expansion MII (No internal T1 PHY) | Expansion MII Bridge Port (SRP + CBS) |
 
 ### Board Configuration (`SJA1110-MGS-EVM`)
 
 | Hardware Item | Configuration / Position | Description |
 | :--- | :---: | :--- |
-| **DIP Switch `SW7`** | `ON` (All others `OFF`) | Selects `SJA1110 BOOT_OPTION1` (SPI Flash Boot) |
+| **DIP Switch `SW2`** | `SW2.6 = ON`, `SW2.7 = ON` (Others `OFF`) | Selects SPI Flash (NVM) Boot per `UM12269` Table 2 & 3 |
 | **Jumpers** | `J58: 1-2`, `J61: 1-2`, `J77: 1-2` | Power, clock, and transceiver routing (leave others open) |
 | **Debug Connector** | `J16` (10-pin Cortex Debug) | JTAG / SWD connection for S32 Debug Probe / PEMicro / J-Link |
 | **SFP Uplink** | `SW1 Port 4` (`PORT_4`) | 1000BASE-T / 1000BASE-X SFP module connected to PC / TSN Talker-Listener |
@@ -86,7 +87,7 @@ The SJA1110 integrates 1 internal Microcontroller Host Port (`Port 0`) and 8 ext
         │  │   (Traps MMRP 0x88F6 & MVRP 0x88F5)   │   │   (Dynamic Multicast Port Bitmap)      │  │
         │  └───────────────────┬───────────────────┘   │ • 4096-VID Hardware VLAN Lookup Table  │  │
         └──────────────────────┼───────────────────────┴───────────────────▲───────────────────────┘
-                               │ Internal Host Port 0 (0x8B8C Mgmt Header) │ SPI / APB Switch_Ip API
+                               │ Internal Host Port 0 (0x8B8C / MAC_FLT)   │ SPI / APB Switch_Ip API
                                ▼                                           │
         ┌──────────────────────────────────────────────────────────────────┼───────────────────────┐
         │                   Arm® Cortex®-M7 @ 200 MHz (FreeRTOS + RTD)     │                       │
@@ -98,9 +99,9 @@ The SJA1110 integrates 1 internal Microcontroller Host Port (`Port 0`) and 8 ext
         │                 │ EtherType 0x88F7            │ EtherType 0x22EA / 0x88F5 / 0x88F6       │
         │                 ▼                             ▼                  │                       │
         │  ┌──────────────────────────┐   ┌─────────────────────────────┐  │                       │
-        │  │ gPTPTask (Prio 3, 2ms)   │   │ SRP_PORT_Periodic()         │  │                       │
+        │  │ gPTPTask (Prio 3, 5ms)   │   │ vSRP_Task (Prio 2, 10ms)    │  │                       │
         │  │ • IEEE 802.1AS GM/Bridge │   │ • MSRP Stream Reservation   ├──┘                       │
-        │  │ • Eth_Main & Eth_Poll    ├──►│ • MVRP Dynamic VLAN Reg     │                          │
+        │  │ • Eth_Main & Eth_Poll    │   │ • MVRP Dynamic VLAN Reg     │                          │
         │  │ • Hardware Timestamping  │   │ • FQTSS Bandwidth Manager   │                          │
         │  └──────────────────────────┘   └─────────────────────────────┘                          │
         └──────────────────────────────────────────────────────────────────────────────────────────┘
@@ -111,9 +112,9 @@ The SJA1110 integrates 1 internal Microcontroller Host Port (`Port 0`) and 8 ext
 | Protocol | IEEE Standard | EtherType | Destination Multicast MAC | SJA1110 Trap Filter | FreeRTOS Consumer |
 | :--- | :--- | :---: | :---: | :--- | :--- |
 | **gPTP** | IEEE 802.1AS-2020 | `0x88F7` | `01:80:C2:00:00:0E` | `DPI Entry #0/#1` + `macFilter0` | `gPTPTask` (`GPTP_PORT_RxIndication`) |
-| **MSRP** | IEEE 802.1Qat / 802.1Q-2018 Cl. 35 | `0x22EA` | `01:80:C2:00:00:0E` | `macFilter0` (Shared with gPTP) | `gPTPTask` (`g_srp_rx_ring` -> `SRP_PORT_Periodic`) |
-| **MVRP** | IEEE 802.1Q-2018 Cl. 11 | `0x88F5` | `01:80:C2:00:00:21` | `macFilter1` (`Mask: FF:FF:FF:FF:FF:FE`) | `gPTPTask` (`g_srp_rx_ring` -> `SRP_PORT_Periodic`) |
-| **MMRP** | IEEE 802.1Q-2018 Cl. 10 | `0x88F6` | `01:80:C2:00:00:20` | `macFilter1` (`Res : 01:80:C2:00:00:20`) | `gPTPTask` (`g_srp_rx_ring` -> `SRP_PORT_Periodic`) |
+| **MSRP** | IEEE 802.1Qat / 802.1Q-2018 Cl. 35 | `0x22EA` | `01:80:C2:00:00:0E` | `macFilter0` (Shared with gPTP) | `vSRP_Task` (`g_srp_rx_ring` -> `SRP_PORT_Periodic`) |
+| **MVRP** | IEEE 802.1Q-2018 Cl. 11 | `0x88F5` | `01:80:C2:00:00:21` | `macFilter1` (`Mask: FF:FF:FF:FF:FF:FE`) | `vSRP_Task` (`g_srp_rx_ring` -> `SRP_PORT_Periodic`) |
+| **MMRP** | IEEE 802.1Q-2018 Cl. 10 | `0x88F6` | `01:80:C2:00:00:20` | `macFilter1` (`Res : 01:80:C2:00:00:20`) | `vSRP_Task` (`g_srp_rx_ring` -> `SRP_PORT_Periodic`) |
 
 ---
 
@@ -138,24 +139,25 @@ This project follows a structured 5-Milestone engineering roadmap tracked via Gi
 - **Extensible Bridge-First Architecture**: Enabled Bridge mode (`is_bridge = 1`) as primary target while preserving Endpoint (`msrp_ep` / `mvrp_ep`) and IPC stub hooks for Milestone 5.
 
 #### Milestone 2: SJA1110 Management Frame (`0x8B8C`) & L2 Trap Pipeline (`v1.0.1-m2`)
-- **Dual Hardware MAC Filter Trapping**:
-  - `macFilter0` (`01:80:C2:00:00:0E`, mask `FF:FF:FF:FF:FF:FF`): Traps IEEE 802.1AS gPTP (`0x88F7`) and IEEE 802.1Qat MSRP (`0x22EA`) frames to internal Host Port 0.
-  - `macFilter1` (`01:80:C2:00:00:20`, mask `FF:FF:FF:FF:FF:FE`, `sendFollowUpTs1 = FALSE`): Simultaneously traps IEEE 802.1Q MMRP (`01:80:C2:00:00:20`, `0x88F6`) and MVRP (`01:80:C2:00:00:21`, `0x88F5`) frames to Host Port 0 with ingress `SwitchPortIdx` metadata.
-- **Zero-Interference RX Demultiplexing**: Extends `EthIf_RxIndication()` to dispatch `0x88F7` directly to `GPTP_MsgReceive()` while queueing `0x22EA` / `0x88F5` / `0x88F6` into `g_srp_rx_ring` with `logical_port = SwitchPortIdx + 1`.
-- **Directed Per-Port Egress TX (`0x8B8C`)**: Implements `net_tx()` via `Eth_ProvideTxBuffer` $\to$ `EthSwt_43_SJA11XX_SetMgmtInfo` $\to$ `EthSwt_43_SJA11XX_EthTxProcessFrame` $\to$ `Eth_Transmit` $\to$ `Eth_TxConfirmation` to guarantee deterministic single-descriptor buffer release.
+- **Dual Hardware MAC Filter Trapping & ENET Hash Filter**:
+  - `macFilter0` (`01:80:C2:00:00:0E`, mask `FF:FF:FF:FF:FF:FF`, `sendFollowUpTs0 = TRUE`): Traps IEEE 802.1AS gPTP (`0x88F7`) and IEEE 802.1Qat MSRP (`0x22EA`) frames to internal Host Port 0.
+  - `macFilter1` (`01:80:C2:00:00:20`, mask `FF:FF:FF:FF:FF:FE`, `sendFollowUpTs1 = TRUE`): Simultaneously traps IEEE 802.1Q MMRP (`01:80:C2:00:00:20`, `0x88F6`) and MVRP (`01:80:C2:00:00:21`, `0x88F5`) frames to Host Port 0, and registers `01:80:C2:0p:00:xx` (`p = 1..8`) in the Cortex-M7 ENET MAC filter.
+- **Zero-Interference RX Demultiplexing**: `SRP_PORT_RxIndication()` fast-path filters `0x22EA` / `0x88F5` / `0x88F6` (including 802.1Q VLAN-tagged `0x8100` frames) into `g_srp_rx_ring` with `logical_port = SwitchPortIdx + 1`, leaving `0x88F7` untouched for `GPTP_PORT_RxIndication()`.
+- **Directed Per-Port Egress TX (`0x8B8C`)**: Implements `net_tx()` via `Eth_ProvideTxBuffer` $\to$ `EthSwt_43_SJA11XX_SetMgmtInfo` $\to$ `EthSwt_43_SJA11XX_EthTxProcessFrame` $\to$ `Eth_Transmit` $\to$ `Eth_TxConfirmation` with per-port source MAC (`22:33:44:55:66:7p`) and mutex-serialized TX buffer access.
 
 #### Milestone 3: Hardware Offload Integration (CBS Shaper, L2 TCAM FDB & VLAN Table) (`v1.0.2-m3`)
-- **IEEE 802.1Qav Credit-Based Shaper (CBS)**: Connects `clock_st_psfp_cbs_config()` to `Switch_Ip_SetCbsIdleSlope(0U, swt_port, tc, idle_slope)` when `idle_slope > 0` and `Switch_Ip_DisableCbs(0U, swt_port, tc)` when `idle_slope == 0`.
+- **IEEE 802.1Qav Credit-Based Shaper (CBS)**: Connects `fqtss_set_oper_idle_slope()` to `Switch_Ip_SetCbsIdleSlope(0U, swt_port, tc, idle_slope)` when `idle_slope > 0` and `Switch_Ip_DisableCbs(0U, swt_port, tc)` when `idle_slope == 0`.
 - **1024-Entry L2 TCAM Multicast Pruning**: Connects `fdb_update()` / `fdb_delete()` to `Switch_Ip_SearchL2EntryInTcam()` and `Switch_Ip_UpdateTcamEntry()`, translating GenAVB `logical_port` registration states into hardware `SwitchPortIdx` egress bitmasks (`destPorts`).
 - **4096-VID Hardware VLAN Lookup Table**: Connects `vlan_update()` / `vlan_delete()` to `Switch_Ip_GetVlanLookupEntry()` and `Switch_Ip_UpdateVlanLookupEntry()`, maintaining `Switch_Ip_Port0` (Host CPU) membership alongside dynamic external bridge ports.
 
 #### Milestone 4: FreeRTOS Dual-Stack Coexistence, Build & Target Validation (`v1.0.3-m4`)
-- **Deterministic Cooperative Task Scheduling**:
-  - `gPTPTask` (`Priority 3`, 2 ms period, `2048` words stack): Cooperative execution of `GPTP_TimerPeriodic()`, `Eth_Main()`, `Eth_Poll()`, `SRP_PORT_Periodic()`, and `FLASH_Write_Poll()`, eliminating lock contention on the single ENET TX buffer descriptor and `Switch_Ip` SPI/APB bus.
-  - `gpioHandleTask` (`Priority 2`, 20 ms period): Polls SJA1110 PHY, SFP, PMIC, and button GPIO interrupts.
-  - `aliveLEDTimer` (`Priority 3`, 500 ms FreeRTOS software timer, `512` words timer task stack): Periodically toggles the onboard Alive LED.
+- **Deterministic Multi-Task Scheduling**:
+  - `gPTPTask` (`Priority 3`, 5 ms period): Dedicated high-priority execution of `Eth_Main()`, `Eth_Poll()`, and `GPTP_TimerPeriodic()`.
+  - `vSRP_Task` (`Priority 2`, 10 ms period): Executes `SRP_PORT_Periodic()` (MRP RX ring dispatch, software timers, link polling, telemetry snapshot) and onboard button polling.
+  - `NVM_Write_Task` (`Priority 1`, 100 ms period): Executes `FLASH_Write_Poll()` with a `0.1 ppm` deadband and `30 s` cooldown to protect external QSPI Flash endurance.
+  - `aliveLEDTimer` (`Priority 3`, 500 ms FreeRTOS software timer): Periodically toggles the onboard Alive LED.
 - **RTOS Resource Allocation**: Expands `configTOTAL_HEAP_SIZE` to `49152` (48 KB) using the FreeRTOS `heap_4` coalescing allocator and enables `configUSE_TIMERS = 1` in `FreeRTOSConfig.h`.
-- **Target & Wireshark Verification**: Clean GCC compilation (`0 errors`), Dual-Bank SPI NVM image generation, and live packet capture verification on `SW1 Port 4` (1G SFP).
+- **Target & Wireshark Verification**: Clean GCC compilation (`0 errors`), Dual-Bank SPI NVM image generation (`256 KB` bank size, `501,696` bytes total), and live packet capture verification on `SW1 Port 4` (1G SFP).
 
 #### Milestone 5: TSN Endpoint Mode (`is_bridge = 0`) & Local IPC Extension (`v1.1.0-m5`)
 - **Host Endpoint Stream Registration**: Activates the retained `msrp_ep` / `mvrp_ep` instances and binds `ipc_tx()` / `ipc_rx()` to FreeRTOS message queues so application tasks on Cortex-M7 can originate Talker Advertise or Listener Ready declarations directly.
@@ -168,6 +170,10 @@ This project follows a structured 5-Milestone engineering roadmap tracked via Gi
 .
 ├── board/                              # SJA1110 hardware pin, switch, and peripheral init configs
 ├── FreeRTOS/                           # FreeRTOS v11.1.0 kernel, heap_4 allocator & Cortex-M7 port
+├── freemaster/                         # FreeMASTER project & live WebSocket/Wireshark telemetry dashboard
+│   ├── sja1110_freemaster.fmcfg        # Symbol-synced FreeMASTER configuration
+│   ├── telemetry_bridge.py             # Live JTAG/pyOCD + Scapy Wireshark WebSocket telemetry server
+│   └── web/index.html                  # Real-time TSN & Wireshark interactive web dashboard
 ├── generate/                           # S32 Configuration Tools (MEX) generated RTD headers/sources
 │   └── include/FreeRTOSConfig.h        # FreeRTOS scheduler, heap (48 KB), and software timer config
 ├── gptp_stack/                         # IEEE 802.1AS gPTP Precision Time Synchronization Stack
@@ -177,33 +183,37 @@ This project follows a structured 5-Milestone engineering roadmap tracked via Gi
 ├── Project_Settings/                   # Linker scripts (Flash/RAM), startup code, debugger configs
 ├── RTD/                                # NXP Real Time Drivers (Eth, EthSwt, Switch_Ip, Spi, Gpt)
 ├── src/                                # Main application & integration sources
-│   ├── main.c                          # Dual-bank init, NVM cache, FreeRTOS tasks (gPTPTask, gpioHandleTask)
+│   ├── main.c                          # Dual-bank init, NVM cache, FreeRTOS tasks (gPTPTask, vSRP_Task, NVM_Write_Task)
 │   ├── EthIf.c                         # 0x8B8C Switch Mgmt frame demux (gPTP + MSRP/MVRP/MMRP)
-│   ├── example_init.c                  # SJA1110 switch/PHY initialization, IRQ handlers & RGB LED control
+│   ├── example_init.c                  # SJA1110 switch/PHY initialization, mutex TX & RGB LED control
 │   └── gptp_cbk.c                      # gPTP domain selection, sync & clock update callbacks
 ├── srp_stack/                          # IEEE 802.1Qat Stream Reservation Protocol (SRP) Stack
 │   ├── common/                         # FQTSS bandwidth shaper, timer pool, SR class & QoS descriptors
 │   │   ├── fqtss.c                     # Credit-Based Shaper (CBS) bandwidth accumulation & offload hook
 │   │   ├── sr_class.c                  # SR Class A (8 kHz) & Class B (4 kHz) domain definitions
 │   │   ├── srp.c                       # SRP protocol PDU definitions
-│   │   └── timer.c                     # Generic timer wrapper over FreeRTOS xTimer
+│   │   └── timer.c                     # Generic timer wrapper over deterministic tick-polled os_timer pool
 │   ├── include/                        # Public & internal GenAVB/TSN headers & FreeRTOS OSAL
 │   │   ├── genavb/                     # Public API headers (config.h, srp.h, fdb.h, vlan.h, qos.h)
 │   │   ├── common/                     # Internal stack headers (fqtss.h, timer.h, managed_objects.h)
 │   │   ├── os/                         # OS Abstraction Layer (stdlib.h, clock.h, timer.h, net.h)
 │   │   └── osal/                       # System types & compiler attributes (sys_types.h)
 │   ├── port/                           # SJA1110 Hardware Adaptation Layer
-│   │   ├── srp_port.h                  # SJA1110 SRP Bridge port API & RX frame descriptor
-│   │   └── srp_port.c                  # 0x8B8C TX/RX, CBS offload, L2 TCAM FDB, VLAN & FreeRTOS task
+│   │   ├── srp_port.h                  # SJA1110 SRP Bridge port API & MCU telemetry struct
+│   │   └── srp_port.c                  # 0x8B8C/MAC_FLT TX/RX, CBS offload, L2 TCAM FDB, VLAN & self-test
 │   └── srp/                            # IEEE 802.1Q MRP / MSRP / MVRP / MMRP State Machines
 │       ├── mrp.c                       # Core MRP Applicant, Registrar & LeaveAll state machines
 │       ├── msrp.c                      # IEEE 802.1Qat MSRP Talker/Listener/Bridge logic
 │       ├── mvrp.c                      # IEEE 802.1Q MVRP dynamic VLAN registration
 │       ├── mmrp.c                      # IEEE 802.1Q MMRP dynamic MAC registration
-│       └── srp_entry.c                 # Top-level srp_init() & srp_exit() entry points
-├── tool/                               # Dual-Bank Flash & NVM binary image post-processing scripts
+│       └── srp_entry.h                 # Top-level srp_init() & srp_exit() entry declarations
+├── tool/                               # Dual-Bank Flash, symbol sync & automated TSN verification scripts
 │   ├── createDBImage.py                # Generates Dual-Bank application flash image
-│   └── createNvmImage.py               # Generates SJA1110 SPI NVM boot image
+│   ├── createNvmImage.py               # Generates SJA1110 SPI NVM boot image
+│   ├── flash_makefile.targets          # Post-build dual-bank QSPI Flash ELF generator (-bfsize=256000)
+│   ├── fix_s32ds_cproject_paths.py     # Normalizes S32DS .cproject include paths to portable relative paths
+│   ├── sync_freemaster_symbols.py      # Syncs ELF DWARF/symbol addresses into freemaster/*.fmcfg
+│   └── test_sja1110_srp.py             # Automated Scapy closed-loop gPTP + MVRP + MSRP verification script
 ├── SJA1110-MGS_gPTP_FreeRTOS.mex       # S32 Configuration Tools hardware project descriptor
 ├── README.md                           # English specification & documentation
 └── README_zh.md                        # 繁體中文技術規格與說明文件
@@ -223,11 +233,11 @@ This project follows a structured 5-Milestone engineering roadmap tracked via Gi
 ### Option A: Build via Command Line (Headless GNU Make)
 ```powershell
 # 1. Setup S32DS build tools and ARM GCC toolchain in PATH
-$env:PATH = "C:\NXP\S32DS.3.6.11\S32DS\build_tools\msys32\usr\bin;C:\NXP\S32DS.3.6.11\S32DS\build_tools\gcc_v9.2\gcc-9.2-arm32-eabi\bin;" + $env:PATH
+$env:PATH = "C:\NXP\S32DS.3.6.11\eclipse\plugins\com.nxp.s32ds.build.tools.msys32_1.0.0.202307180758\msys32\usr\bin;C:\NXP\S32DS.3.6.11\S32DS\build_tools\gcc_v9.2\gcc-9.2-arm32-eabi\bin;" + $env:PATH
 
-# 2. Build Debug_FLASH or Debug_RAM target
-cd Debug_FLASH
-make -j8 all
+# 2. Build Debug_FLASH ELF + Dual-Bank QSPI Flash image (app_flash.elf) and sync FreeMASTER symbols
+make -C Debug_FLASH -j8 user_all CWD=.
+python tool/sync_freemaster_symbols.py --elf Debug_FLASH/SJA1110_MGS_gPTP_FreeRTOS.elf
 ```
 
 ### Option B: Build and Run via S32 Design Studio IDE
@@ -242,8 +252,8 @@ make -j8 all
  
 > [!NOTE]
 > **Live Target Verification Status (T1 ~ T5 All Verified PASS)**:
-> - **Scenario A (Single board JTAG, milestones T1–T3)**: **100% Verified (PASS)** on real `SJA1110-MGS-EVM` hardware! Confirmed: FreeRTOS `heap_4` 19.5 KB remaining with 0 leaks, 8-port SRP Bridge scheduler active, MVRP VID 2 entry, L2 TCAM stream multicast forwarding, and IEEE 802.1Qav CBS hardware shaper all successfully offloaded.
-> - **Scenario B (Ethernet + PC, milestones T4–T5)**: Connected via `SW1 Port 4` to PC Ethernet NIC, **100% Verified (PASS)**! Successfully captured 80 sets of gPTP Sync/Follow_Up (125ms interval), 10 sets of Pdelay_Req/Resp bidirectional locking (<150ns latency), SJA1110 `0x8B8C` management header zero leakage, periodic MSRP LeaveAll, and bidirectional MVRP/MSRP injection loop closure.
+> - **Scenario A (Single board JTAG, milestones T1–T3)**: **100% Verified (PASS)** on real `SJA1110-MGS-EVM` hardware! Confirmed: FreeRTOS `heap_4` `13,064` Bytes free (`60` allocs / `16` frees, 0 leaks), 8-port SRP Bridge scheduler active (`g_srp_bridge_ctx = 0x20007dd0`), clean boot state (`active_vlan_id = 0`), and PDU-driven self-test (`g_srp_run_selftest = 1`) offloading MVRP `VID = 2`, L2 TCAM (`91:E0:F0:00:FE:00`, `dest_ports = 16`, `tcam_index = 16`), and IEEE 802.1Qav CBS (`oper_idle_slope = 10,944,000` bps).
+> - **Scenario B (Ethernet + PC, milestones T4–T5)**: Connected via `SW1 Port 4` to PC Ethernet NIC, **100% Verified (PASS)**! Captured `80+` gPTP Sync/Follow_Up frames (125 ms interval), `10` Pdelay_Req/Resp bidirectional exchanges, `0` SJA1110 `0x8B8C` header leaks, outbound EVB `MSRP Talker Advertise` (`src = 22:33:44:55:66:75`) & `LeaveAll`, and verified live MCU SRAM state after Ethernet injection (`active_vlan_id = 2`, `active_tcam_dest_ports = 16`, `port4_cbs_slope_bps = 10,944,000` bps, `rx_mrp_packets = 24`, `tx_mrp_packets = 37`).
 >
 > For full step-by-step verification, GDB watch variables, and live test data, see **[TEST_PLAN.md](TEST_PLAN.md)** ([繁體中文測試計畫](TEST_PLAN_zh.md)).
  
@@ -257,8 +267,8 @@ make -j8 all
    * **IEEE 802.1Qat MSRP (`0x22EA`, Dest `01:80:C2:00:00:0E`)**: Domain Attribute declarations (SR Class A Prio 3 / VID 2, SR Class B Prio 2 / VID 2), periodic `LeaveAll` events, and dynamic `Talker Advertise` / `Listener Ready` propagation across Bridge Ports `1..8`.
    * **IEEE 802.1Q MVRP (`0x88F5`, Dest `01:80:C2:00:00:21`)**: Dynamic VLAN membership declarations and registration updates.
 4. **LED Status Indicators**:
-   * **Alive LED**: Toggles periodically under `Eth_Task` to confirm normal FreeRTOS scheduler operation.
-   * **RGB LED**: Flashes **Green** (when booted from Dual-Bank Image 1) or **Yellow** (when booted from Dual-Bank Image 2) on Ethernet frame activity.
+   * **Alive LED**: Toggles periodically every 500 ms via FreeRTOS software timer `aliveLEDTimer` (`toggleAliveLED`) to confirm normal scheduler operation.
+   * **RGB LED**: Indicates booted Dual-Bank partition at startup (**Green** = Bank 1, **Yellow** = Bank 2, **Red** = Boot Error) and changes on button/PHY interrupts (**Magenta** = BUTTON1 Self-Test, **Cyan** = BUTTON2).
  
 ---
 

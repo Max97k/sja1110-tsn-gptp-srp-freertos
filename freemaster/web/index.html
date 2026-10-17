@@ -274,7 +274,7 @@
           </div>
           <div class="metric-box">
             <div class="metric-label">Pdelay 延遲</div>
-            <div class="metric-value cyan" id="pdelay-val">&lt; 150 ns</div>
+            <div class="metric-value cyan" id="pdelay-val">N/A (無探針)</div>
           </div>
           <div class="metric-box">
             <div class="metric-label">Master MAC</div>
@@ -296,11 +296,11 @@
         <div class="metric-grid">
           <div class="metric-box">
             <div class="metric-label">剩餘可用空間</div>
-            <div class="metric-value green" id="heap-free">19,576 B</div>
+            <div class="metric-value green" id="heap-free">N/A (無探針)</div>
           </div>
           <div class="metric-box">
             <div class="metric-label">歷史最低水線</div>
-            <div class="metric-value green" id="heap-min">19,576 B</div>
+            <div class="metric-value green" id="heap-min">N/A (無探針)</div>
           </div>
         </div>
       </div>
@@ -311,15 +311,15 @@
           <span>SJA1110 8-Port 交換矩陣狀態</span>
           <span style="font-size:10px;color:var(--text-muted);">雙濾波 Trap 生效</span>
         </div>
-        <div class="port-grid">
-          <div class="port-node active"><div class="port-name">Port 1</div><div class="port-speed">100M MII</div><div class="port-led"></div></div>
-          <div class="port-node active"><div class="port-name">Port 2</div><div class="port-speed">100M MII</div><div class="port-led"></div></div>
-          <div class="port-node active"><div class="port-name">Port 3</div><div class="port-speed">100M MII</div><div class="port-led"></div></div>
-          <div class="port-node active-1g"><div class="port-name">Port 4</div><div class="port-speed">1G SFP (PC)</div><div class="port-led"></div></div>
-          <div class="port-node"><div class="port-name">Port 5</div><div class="port-speed">100BASE-T1</div><div class="port-led"></div></div>
-          <div class="port-node"><div class="port-name">Port 6</div><div class="port-speed">100BASE-T1</div><div class="port-led"></div></div>
-          <div class="port-node"><div class="port-name">Port 7</div><div class="port-speed">100BASE-T1</div><div class="port-led"></div></div>
-          <div class="port-node active"><div class="port-name">Port 8</div><div class="port-speed">100M MII</div><div class="port-led"></div></div>
+        <div class="port-grid" id="port-grid">
+          <div class="port-node" id="port-node-0"><div class="port-name">Port 1</div><div class="port-speed" id="port-rate-0">1G SGMII</div><div class="port-led"></div></div>
+          <div class="port-node" id="port-node-1"><div class="port-name">Port 2</div><div class="port-speed" id="port-rate-1">1G RGMII</div><div class="port-led"></div></div>
+          <div class="port-node" id="port-node-2"><div class="port-name">Port 3</div><div class="port-speed" id="port-rate-2">100M SGMII</div><div class="port-led"></div></div>
+          <div class="port-node active-1g" id="port-node-3"><div class="port-name">Port 4</div><div class="port-speed" id="port-rate-3">1G SFP (PC)</div><div class="port-led"></div></div>
+          <div class="port-node" id="port-node-4"><div class="port-name">Port 5</div><div class="port-speed" id="port-rate-4">100BASE-T1</div><div class="port-led"></div></div>
+          <div class="port-node" id="port-node-5"><div class="port-name">Port 6</div><div class="port-speed" id="port-rate-5">100BASE-T1</div><div class="port-led"></div></div>
+          <div class="port-node" id="port-node-6"><div class="port-name">Port 7</div><div class="port-speed" id="port-rate-6">100BASE-T1</div><div class="port-led"></div></div>
+          <div class="port-node" id="port-node-7"><div class="port-name">Port 8</div><div class="port-speed" id="port-rate-7">100M MII</div><div class="port-led"></div></div>
         </div>
       </div>
 
@@ -364,11 +364,12 @@
       <!-- Toolbar & Protocol Counters -->
       <div class="packet-toolbar">
         <div class="filter-tabs">
-          <div class="filter-tab active" onclick="setFilter('all')">全部 <span class="filter-count" id="count-all">0</span></div>
-          <div class="filter-tab" onclick="setFilter('gptp-sync')">gPTP Sync <span class="filter-count" id="count-sync">0</span></div>
-          <div class="filter-tab" onclick="setFilter('gptp-pdelay')">gPTP Pdelay <span class="filter-count" id="count-pdelay">0</span></div>
-          <div class="filter-tab" onclick="setFilter('msrp')">MSRP <span class="filter-count" id="count-msrp">0</span></div>
-          <div class="filter-tab" onclick="setFilter('mvrp')">MVRP <span class="filter-count" id="count-mvrp">0</span></div>
+          <div class="filter-tab active" onclick="setFilter('all', event)">全部 <span class="filter-count" id="count-all">0</span></div>
+          <div class="filter-tab" onclick="setFilter('gptp-sync', event)">gPTP Sync <span class="filter-count" id="count-sync">0</span></div>
+          <div class="filter-tab" onclick="setFilter('gptp-fup', event)">Follow_Up <span class="filter-count" id="count-fup">0</span></div>
+          <div class="filter-tab" onclick="setFilter('gptp-pdelay', event)">gPTP Pdelay <span class="filter-count" id="count-pdelay">0</span></div>
+          <div class="filter-tab" onclick="setFilter('msrp', event)">MSRP <span class="filter-count" id="count-msrp">0</span></div>
+          <div class="filter-tab" onclick="setFilter('mvrp', event)">MVRP <span class="filter-count" id="count-mvrp">0</span></div>
         </div>
         <div style="display:flex;gap:10px;align-items:center;">
           <label style="font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:4px;">
@@ -460,6 +461,7 @@
       // Update badge counts
       document.getElementById('count-all').innerText = packets.length;
       document.getElementById('count-sync').innerText = packets.filter(p => p.tag === 'gptp-sync').length;
+      document.getElementById('count-fup').innerText = packets.filter(p => p.tag === 'gptp-fup').length;
       document.getElementById('count-pdelay').innerText = packets.filter(p => p.tag === 'gptp-pdelay').length;
       document.getElementById('count-msrp').innerText = packets.filter(p => p.tag === 'msrp').length;
       document.getElementById('count-mvrp').innerText = packets.filter(p => p.tag === 'mvrp').length;
@@ -516,10 +518,12 @@
       document.getElementById('inspector-hex').innerText = pkt.hex_dump || '-- 無 Hex 資料 --';
     }
 
-    function setFilter(filter) {
+    function setFilter(filter, evt) {
       activeFilter = filter;
       document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
-      event.target.closest('.filter-tab').classList.add('active');
+      if (evt && evt.currentTarget) {
+        evt.currentTarget.classList.add('active');
+      }
 
       const tbody = document.getElementById('packet-tbody');
       tbody.innerHTML = '';
@@ -535,6 +539,7 @@
       document.getElementById('packet-tbody').innerHTML = '';
       document.getElementById('count-all').innerText = '0';
       document.getElementById('count-sync').innerText = '0';
+      document.getElementById('count-fup').innerText = '0';
       document.getElementById('count-pdelay').innerText = '0';
       document.getElementById('count-msrp').innerText = '0';
       document.getElementById('count-mvrp').innerText = '0';
@@ -553,11 +558,28 @@
         el.innerText = `${s.leak_8b8c} (${s.leak_8b8c === 0 ? 'PASS' : 'LEAK!'})`;
         el.className = s.leak_8b8c === 0 ? 'metric-value green' : 'metric-value red';
       }
-      if (s.free_heap_bytes) document.getElementById('heap-free').innerText = `${s.free_heap_bytes.toLocaleString()} B`;
-      if (s.min_free_heap_bytes) document.getElementById('heap-min').innerText = `${s.min_free_heap_bytes.toLocaleString()} B`;
+      document.getElementById('pdelay-val').innerText = (s.pdelay_ns !== null && s.pdelay_ns !== undefined) ? `${s.pdelay_ns} ns` : 'N/A (無探針)';
+      document.getElementById('heap-free').innerText = (s.free_heap_bytes !== null && s.free_heap_bytes !== undefined) ? `${s.free_heap_bytes.toLocaleString()} B` : 'N/A (無探針)';
+      document.getElementById('heap-min').innerText = (s.min_free_heap_bytes !== null && s.min_free_heap_bytes !== undefined) ? `${s.min_free_heap_bytes.toLocaleString()} B` : 'N/A (無探針)';
       if (s.vlan_offload) document.getElementById('offload-vlan').innerText = s.vlan_offload;
       if (s.tcam_offload) document.getElementById('offload-tcam').innerText = s.tcam_offload;
-      if (s.cbs_slope_bps) document.getElementById('offload-cbs').innerText = `${(s.cbs_slope_bps / 1e6).toFixed(3)} Mbps (Port 4)`;
+      document.getElementById('offload-cbs').innerText = (s.cbs_slope_bps !== null && s.cbs_slope_bps !== undefined) ? `${(s.cbs_slope_bps / 1e6).toFixed(3)} Mbps (Port 4)` : 'N/A (無探針)';
+
+      if (Array.isArray(s.port_links)) {
+        s.port_links.forEach((up, idx) => {
+          const node = document.getElementById(`port-node-${idx}`);
+          if (node) {
+            const is1g = (idx === 0 || idx === 1 || idx === 3);
+            node.className = up ? (is1g ? 'port-node active-1g' : 'port-node active') : 'port-node';
+          }
+        });
+      }
+      if (Array.isArray(s.port_rates)) {
+        s.port_rates.forEach((rate, idx) => {
+          const rEl = document.getElementById(`port-rate-${idx}`);
+          if (rEl) rEl.innerText = rate;
+        });
+      }
     }
 
     // API Trigger helpers

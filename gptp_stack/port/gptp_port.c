@@ -351,7 +351,8 @@ gptp_err_type_t GPTP_PORT_MsgSend(uint8_t u8Port,
 
                 if ((Std_ReturnType)E_OK != eStatus)
                 {
-                    /* Could not enable timestamping. */
+                    /* Could not enable timestamping; release locked TX buffer descriptor (SWS_Eth_00088). */
+                    (void)Eth_Transmit(EthConf_EthCtrlConfig_EthCtrlConfig_0, srBufferIndex, (Eth_FrameType)0U, false, 0U, sauMcMac);
                     eError = GPTP_ERR_T_TS_NOT_REGISTERED;
                 }
                 else
@@ -362,7 +363,8 @@ gptp_err_type_t GPTP_PORT_MsgSend(uint8_t u8Port,
 
                     if ((Std_ReturnType)E_OK != eStatus)
                     {
-                        /* Could not process frame. */
+                        /* Could not process frame; release locked TX buffer descriptor (SWS_Eth_00088). */
+                        (void)Eth_Transmit(EthConf_EthCtrlConfig_EthCtrlConfig_0, srBufferIndex, (Eth_FrameType)0U, false, 0U, sauMcMac);
                         eError = GPTP_ERR_T_TS_NOT_REGISTERED;
                     }
                     else 
@@ -396,7 +398,8 @@ gptp_err_type_t GPTP_PORT_MsgSend(uint8_t u8Port,
             }
             else
             {
-                /* Could not set as management frame. */
+                /* Could not set as management frame; release locked TX buffer descriptor (SWS_Eth_00088). */
+                (void)Eth_Transmit(EthConf_EthCtrlConfig_EthCtrlConfig_0, srBufferIndex, (Eth_FrameType)0U, false, 0U, sauMcMac);
                 eError = GPTP_ERR_T_TS_NOT_REGISTERED;
             }
         }

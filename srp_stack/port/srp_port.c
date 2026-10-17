@@ -25,6 +25,7 @@
 #include "Switch_Ip.h"
 #include "Switch_Ip_SJA1110_Tables.h"
 #include "Switch_Ip_Cbs.h"
+#include "Phy_Ip.h"
 
 #include "../srp/config.h"
 #include "common/ipc.h"
@@ -126,8 +127,15 @@ static srp_fdb_shadow_t g_srp_fdb_table[SRP_MAX_FDB_ENTRIES];
 
 /* Cached link state per external bridge port (port_idx 0..7 -> SwitchPortIdx 1..8) */
 static boolean g_srp_port_link_up[SRP_SJA1110_NUM_BR_PORTS];
+static boolean g_srp_port_force_up[SRP_SJA1110_NUM_BR_PORTS];
 static uint64_t g_srp_port_rate_bps[SRP_SJA1110_NUM_BR_PORTS];
 static TickType_t g_srp_last_link_poll_tick = 0U;
+static uint32_t g_srp_port4_last_cbs_bps = 0U;
+static uint16_t g_srp_last_active_vid = 0U;
+static uint32_t g_srp_rx_pkt_cnt = 0U;
+static uint32_t g_srp_tx_pkt_cnt = 0U;
+
+volatile srp_mcu_telemetry_t g_srp_telemetry;
 
 /* Galois LFSR seed for os_random() */
 static uint32_t g_srp_lfsr_state = 0xACE12468UL;
@@ -167,15 +175,40 @@ static int srp_logical_to_swt_port(unsigned int logical_port, uint8 *swt_port)
 static void srp_query_swt_port_link(uint8 swt_port, boolean *up, uint64_t *rate_bps)
 {
     Switch_Ip_SJA1110_macCfgTableEntryType macCfg;
-    EthTrcv_LinkStateType linkState = ETHTRCV_LINK_STATE_ACTIVE;
-    uint32_t portStatusReg = 0U;
+    EthTrcv_LinkStateType linkState = ETHTRCV_LINK_STATE_DOWN;
+    boolean phyLinkUp = FALSE;
 
-    *up = TRUE;
+    /* Default to FALSE so unconfigured/unplugged ports do not falsely report Link Up */
+    *up = FALSE;
     *rate_bps = 100000000ULL; /* Default 100 Mbps */
 
-    if ((Std_ReturnType)E_OK == EthSwt_43_SJA11XX_GetLinkState(SRP_SJA1110_SWT_ID, swt_port, &linkState))
+    if ((swt_port >= 1U) && (swt_port <= SRP_SJA1110_NUM_BR_PORTS) && g_srp_port_force_up[swt_port - 1U])
     {
-        *up = (ETHTRCV_LINK_STATE_DOWN == linkState) ? FALSE : TRUE;
+        *up = TRUE;
+    }
+    else if ((Std_ReturnType)E_OK == EthSwt_43_SJA11XX_GetLinkState(SRP_SJA1110_SWT_ID, swt_port, &linkState))
+    {
+        *up = (ETHTRCV_LINK_STATE_ACTIVE == linkState) ? TRUE : FALSE;
+    }
+    else
+    {
+        /* Fallback to Phy_Ip instance lookup for ports whose EthSwt GetLinkState pointer is NULL_PTR */
+        if ((swt_port == 2U) && (STATUS_PHY_IP_SUCCESS == Phy_Ip_GetLinkStatus(5U /* PHY_TJA1121A */, &phyLinkUp)))
+        {
+            *up = phyLinkUp;
+        }
+        else if ((swt_port == 4U) && (STATUS_PHY_IP_SUCCESS == Phy_Ip_GetLinkStatus(1U /* PHY_SGMII_P4 */, &phyLinkUp)) && phyLinkUp)
+        {
+            *up = TRUE;
+        }
+        else if ((SRP_PHYLESS_PORT_FORCE_UP_MASK & (1U << swt_port)) != 0U)
+        {
+            *up = TRUE;
+        }
+        else
+        {
+            *up = FALSE;
+        }
     }
 
     /* SJA1110 Port 1, 2, 4 are 1 Gbps capable; Ports 3, 5..8 are 100 Mbps */
@@ -203,7 +236,6 @@ static void srp_query_swt_port_link(uint8 swt_port, boolean *up, uint64_t *rate_
             /* Keep default speed based on port role */
         }
     }
-    (void)portStatusReg;
 }
 
 /**
@@ -220,6 +252,23 @@ static Std_ReturnType SRP_PORT_ConfigureHwTrap(void)
     (void)Eth_UpdatePhysAddrFilter(EthConf_EthCtrlConfig_EthCtrlConfig_0, g_mmrp_mc_mac, ETH_ADD_TO_FILTER);
     (void)Eth_UpdatePhysAddrFilter(EthConf_EthCtrlConfig_EthCtrlConfig_0, g_mvrp_mc_mac, ETH_ADD_TO_FILTER);
 
+    /* Also register SJA1110 MAC_FLT port-tagged DA variants (01:80:C2:0p:00:xx, UM11107) in ENET hash filter */
+    for (idx = SRP_SJA1110_FIRST_SW_PORT; idx <= SRP_SJA1110_NUM_BR_PORTS; idx++)
+    {
+        uint8 tagged_mac[6];
+        os_memcpy(tagged_mac, g_msrp_mc_mac, 6U);
+        tagged_mac[3] = idx;
+        (void)Eth_UpdatePhysAddrFilter(EthConf_EthCtrlConfig_EthCtrlConfig_0, tagged_mac, ETH_ADD_TO_FILTER);
+
+        os_memcpy(tagged_mac, g_mmrp_mc_mac, 6U);
+        tagged_mac[3] = idx;
+        (void)Eth_UpdatePhysAddrFilter(EthConf_EthCtrlConfig_EthCtrlConfig_0, tagged_mac, ETH_ADD_TO_FILTER);
+
+        os_memcpy(tagged_mac, g_mvrp_mc_mac, 6U);
+        tagged_mac[3] = idx;
+        (void)Eth_UpdatePhysAddrFilter(EthConf_EthCtrlConfig_EthCtrlConfig_0, tagged_mac, ETH_ADD_TO_FILTER);
+    }
+
     /* Update SJA1110 GeneralParametersTable macFilter1 to trap 01:80:C2:00:00:20 (MMRP) & 01:80:C2:00:00:21 (MVRP)
      * while preserving macFilter0 (01:80:C2:00:00:0E for gPTP 0x88F7 and MSRP 0x22EA).
      */
@@ -235,7 +284,7 @@ static Std_ReturnType SRP_PORT_ConfigureHwTrap(void)
         genParams.macFilter0[idx]       = 0xFFU;
         genParams.macFilterResult0[idx] = g_msrp_mc_mac[idx];
     }
-    genParams.sendFollowUpTs0     = FALSE;
+    genParams.sendFollowUpTs0     = TRUE;
 
     /* Configure macFilter1 to trap 01:80:C2:00:00:20 (MMRP) & 01:80:C2:00:00:21 (MVRP) */
     for (idx = 0U; idx < 5U; idx++)
@@ -246,7 +295,7 @@ static Std_ReturnType SRP_PORT_ConfigureHwTrap(void)
     /* Ignore LSB bit 0 so both 0x20 (MMRP) and 0x21 (MVRP) match macFilter1 */
     genParams.macFilter1[5]       = 0xFEU;
     genParams.macFilterResult1[5] = 0x20U;
-    genParams.sendFollowUpTs1     = FALSE;
+    genParams.sendFollowUpTs1     = TRUE;
 
     swtStatus = Switch_Ip_UpdateGeneralParamsTable(SRP_SJA1110_SWT_ID, &genParams);
     return (SWITCH_STATUS_SUCCESS == swtStatus) ? E_OK : E_NOT_OK;
@@ -926,6 +975,8 @@ int net_tx(struct net_tx *tx, struct net_tx_desc *desc)
     status = EthSwt_43_SJA11XX_SetMgmtInfo(EthConf_EthCtrlConfig_EthCtrlConfig_0, buf_idx, &mgmt_info);
     if (E_OK != status)
     {
+        /* Release locked TX buffer descriptor on failure (AUTOSAR SWS_Eth_00088) */
+        (void)Eth_Transmit(EthConf_EthCtrlConfig_EthCtrlConfig_0, buf_idx, (Eth_FrameType)0U, FALSE, 0U, dst_mac);
         return -1;
     }
 
@@ -935,22 +986,41 @@ int net_tx(struct net_tx *tx, struct net_tx_desc *desc)
                                                  &payload_len);
     if (E_OK != status)
     {
+        /* Release locked TX buffer descriptor on failure (AUTOSAR SWS_Eth_00088) */
+        (void)Eth_Transmit(EthConf_EthCtrlConfig_EthCtrlConfig_0, buf_idx, (Eth_FrameType)0U, FALSE, 0U, dst_mac);
         return -1;
     }
 
     /* Align payload buffer after SJA1110 management header insertion (matches GPTP_PORT_MsgSend) */
     os_memmove(payload_buf, &payload_buf[2], (size_t)(frame_len - 12U));
 
-    Eth_SetPhysAddr(EthConf_EthCtrlConfig_EthCtrlConfig_0, &frame_ptr[6]);
+    {
+        uint8 orig_mac[6];
+        uint8 src_mac[6];
+        Eth_GetPhysAddr(EthConf_EthCtrlConfig_EthCtrlConfig_0, orig_mac);
+        if ((frame_ptr[6] | frame_ptr[7] | frame_ptr[8] | frame_ptr[9] | frame_ptr[10] | frame_ptr[11]) == 0U)
+        {
+            (void)net_get_local_addr(tx->port_id, src_mac);
+        }
+        else
+        {
+            os_memcpy(src_mac, &frame_ptr[6], 6U);
+        }
+        Eth_SetPhysAddr(EthConf_EthCtrlConfig_EthCtrlConfig_0, src_mac);
 
-    status = Eth_Transmit(EthConf_EthCtrlConfig_EthCtrlConfig_0,
-                          buf_idx,
-                          SRP_MGMT_FRAME_ETHERTYPE,
-                          TRUE,
-                          payload_len,
-                          dst_mac);
+        status = Eth_Transmit(EthConf_EthCtrlConfig_EthCtrlConfig_0,
+                              buf_idx,
+                              SRP_MGMT_FRAME_ETHERTYPE,
+                              TRUE,
+                              payload_len,
+                              dst_mac);
+
+        /* Immediately restore Host Port 0 MAC in ENET PALR/PAUR registers */
+        Eth_SetPhysAddr(EthConf_EthCtrlConfig_EthCtrlConfig_0, orig_mac);
+    }
     if (E_OK != status)
     {
+        (void)Eth_Transmit(EthConf_EthCtrlConfig_EthCtrlConfig_0, buf_idx, (Eth_FrameType)0U, FALSE, 0U, dst_mac);
         return -1;
     }
 
@@ -968,6 +1038,7 @@ int net_tx(struct net_tx *tx, struct net_tx_desc *desc)
 
     /* Free descriptor on successful transmission (GenAVB net_tx contract) */
     net_tx_free(desc);
+    g_srp_tx_pkt_cnt++;
 
     return 1;
 }
@@ -1041,10 +1112,18 @@ int fqtss_set_oper_idle_slope(unsigned int port_id, uint8_t traffic_class, uint6
     {
         uint32 hw_idle_slope = (idle_slope < 8ULL) ? 8UL : (uint32)idle_slope;
         status = Switch_Ip_SetCbsIdleSlope(SRP_SJA1110_SWT_ID, swt_port, traffic_class, hw_idle_slope);
+        if ((SWITCH_STATUS_SUCCESS == status) && (swt_port == 4U))
+        {
+            g_srp_port4_last_cbs_bps = hw_idle_slope;
+        }
     }
     else
     {
         status = Switch_Ip_DisableCbs(SRP_SJA1110_SWT_ID, swt_port, traffic_class);
+        if ((SWITCH_STATUS_SUCCESS == status) && (swt_port == 4U))
+        {
+            g_srp_port4_last_cbs_bps = 0U;
+        }
     }
 
     return (SWITCH_STATUS_SUCCESS == status) ? 0 : -1;
@@ -1272,6 +1351,10 @@ int vlan_update(uint16_t vid, bool dynamic, struct genavb_vlan_port_map *map)
     vltEntry.vingMirr  = 0U;
 
     status = Switch_Ip_UpdateVlanLookupEntry(SRP_SJA1110_SWT_ID, &vltEntry);
+    if (SWITCH_STATUS_SUCCESS == status)
+    {
+        g_srp_last_active_vid = vid;
+    }
     return (SWITCH_STATUS_SUCCESS == status) ? 0 : -1;
 }
 
@@ -1289,6 +1372,10 @@ int vlan_delete(uint16_t vid, bool dynamic)
     vltEntry.tagPort   = 0U;
 
     status = Switch_Ip_UpdateVlanLookupEntry(SRP_SJA1110_SWT_ID, &vltEntry);
+    if ((SWITCH_STATUS_SUCCESS == status) && (g_srp_last_active_vid == vid))
+    {
+        g_srp_last_active_vid = 0U;
+    }
     return (SWITCH_STATUS_SUCCESS == status) ? 0 : -1;
 }
 
@@ -1354,6 +1441,101 @@ int vlan_port_get_default(unsigned int port_id, uint16_t *vid)
  *                          PUBLIC SJA1110 SRP PORTING API IMPLEMENTATION
  *==================================================================================================*/
 
+/**
+ * @brief Helper to queue a synthetic MRP PDU into g_srp_rx_ring for closed-loop self-testing.
+ */
+static int srp_inject_rx_pdu(uint8 swt_port, uint16 ethertype, const uint8 *dst_mac, const uint8 *src_mac, const uint8 *pdu, uint16 pdu_len)
+{
+    struct net_rx_desc *desc;
+    struct eth_hdr *eth;
+
+    if ((swt_port < SRP_SJA1110_FIRST_SW_PORT) || (swt_port > SRP_SJA1110_NUM_BR_PORTS) || (g_srp_rx_count >= SRP_RX_QUEUE_DEPTH))
+    {
+        return -1;
+    }
+
+    desc = (struct net_rx_desc *)os_malloc(sizeof(struct net_rx_desc) + sizeof(struct eth_hdr) + pdu_len);
+    if (desc == NULL)
+    {
+        return -1;
+    }
+
+    os_memset(desc, 0, sizeof(struct net_rx_desc));
+    desc->l2_offset = (uint16_t)sizeof(struct net_rx_desc);
+    desc->l3_offset = (uint16_t)(desc->l2_offset + sizeof(struct eth_hdr));
+    desc->len       = (uint16_t)(sizeof(struct eth_hdr) + pdu_len);
+    desc->ethertype = ethertype;
+    desc->port      = (unsigned int)swt_port + 1U;
+
+    eth = (struct eth_hdr *)((uint8_t *)desc + desc->l2_offset);
+    os_memcpy(eth->dst, dst_mac, 6U);
+    os_memcpy(eth->src, src_mac, 6U);
+    eth->type = htons(ethertype);
+    os_memcpy((uint8_t *)desc + desc->l3_offset, pdu, pdu_len);
+
+    taskENTER_CRITICAL();
+    if (g_srp_rx_count < SRP_RX_QUEUE_DEPTH)
+    {
+        g_srp_rx_ring[g_srp_rx_head] = desc;
+        g_srp_rx_head = (uint8_t)((g_srp_rx_head + 1U) % SRP_RX_QUEUE_DEPTH);
+        g_srp_rx_count++;
+        g_srp_rx_pkt_cnt++;
+        desc = NULL;
+    }
+    taskEXIT_CRITICAL();
+
+    if (desc != NULL)
+    {
+        os_free(desc);
+        return -1;
+    }
+    return 0;
+}
+
+static void srp_force_port_operational(uint8 swt_port, uint64_t rate_bps)
+{
+    srp_ipc_channel_t *rx_ch = &g_srp_ipc_channels[IPC_MAC_SERVICE_BRIDGE_MEDIA_STACK];
+    if ((swt_port >= 1U) && (swt_port <= SRP_SJA1110_NUM_BR_PORTS))
+    {
+        g_srp_port_force_up[swt_port - 1U] = TRUE;
+        g_srp_port_link_up[swt_port - 1U]  = TRUE;
+        g_srp_port_rate_bps[swt_port - 1U] = rate_bps;
+        if ((rx_ch->rx != NULL) && (rx_ch->count < SRP_IPC_QUEUE_DEPTH))
+        {
+            struct ipc_desc *resp = ipc_alloc(NULL, sizeof(struct ipc_mac_service_status));
+            if (resp != NULL)
+            {
+                resp->type = IPC_MAC_SERVICE_STATUS;
+                resp->len  = sizeof(struct ipc_mac_service_status);
+                resp->u.mac_service_status.port_id        = (u16)(swt_port + 1U);
+                resp->u.mac_service_status.operational    = 1U;
+                resp->u.mac_service_status.point_to_point = 1U;
+                resp->u.mac_service_status.rate           = (u32)rate_bps;
+                rx_ch->queue[rx_ch->head] = resp;
+                rx_ch->head = (uint8_t)((rx_ch->head + 1U) % SRP_IPC_QUEUE_DEPTH);
+                rx_ch->count++;
+            }
+        }
+    }
+}
+
+/* IEEE 802.1Qat MSRP Domain PDU (0x22EA): SR Class A (ID=6, Priority=3, VID=2)
+ * Required by IEEE 802.1BA-2011 6.4 so egress ports clear srp_domain_boundary_port[SR_CLASS_A].
+ */
+static const uint8_t g_msrp_domain_class_a_pdu[] = {
+    0x00U,             /* ProtocolVersion = 0 */
+    0x04U,             /* AttributeType = Domain (4) */
+    4U,                /* AttributeLength = 4 */
+    0x00U, 9U,         /* AttributeListLength = 2 + 4 + 1 + 2 = 9 */
+    0x00U, 0x01U,      /* VectorHeader: LeaveAll=0, NumberOfValues=1 */
+    6U,                /* SRclassID = 6 (Class A) */
+    3U,                /* SRclassPriority = 3 */
+    0x00U, 0x02U,      /* SRclassVID = 2 */
+    0x24U,             /* ThreePackedEvent: JoinIn (1 * 36 = 0x24) */
+    0x00U, 0x00U,      /* Vector EndMark */
+    0x00U, 0x00U       /* PDU EndMark */
+};
+
 Std_ReturnType SRP_PORT_Init(void)
 {
     unsigned int i;
@@ -1363,6 +1545,8 @@ Std_ReturnType SRP_PORT_Init(void)
     os_memset(g_srp_timers, 0, sizeof(g_srp_timers));
     os_memset(g_srp_ipc_channels, 0, sizeof(g_srp_ipc_channels));
     os_memset(g_srp_fdb_table, 0, sizeof(g_srp_fdb_table));
+    os_memset(g_srp_port_force_up, 0, sizeof(g_srp_port_force_up));
+    g_srp_last_active_vid = 0U;
 
     /* 1. Initialize SJA1110 hardware multicast traps for MSRP, MVRP, and MMRP */
     (void)SRP_PORT_ConfigureHwTrap();
@@ -1475,6 +1659,43 @@ boolean SRP_PORT_RxIndication(uint8 u8CtrlIdx,
         }
     }
 
+    /* When trapped via SJA1110 GeneralParameters macFilter0/macFilter1 without 0x8B8C header,
+     * SJA1110 encodes the ingress port in byte 3 of the destination MAC (UM11107 MAC_FLT).
+     */
+    if ((swt_port < SRP_SJA1110_FIRST_SW_PORT) || (swt_port > SRP_SJA1110_NUM_BR_PORTS))
+    {
+        if (((uintptr_t)cpu8Data >= ((uintptr_t)cpu8PhysAddr + 8U)) &&
+            (((uintptr_t)cpu8Data - (uintptr_t)cpu8PhysAddr) <= 16U))
+        {
+            const uint8 *raw_dst = (const uint8 *)(cpu8PhysAddr - 6U);
+            if ((raw_dst[3] >= SRP_SJA1110_FIRST_SW_PORT) && (raw_dst[3] <= SRP_SJA1110_NUM_BR_PORTS))
+            {
+                swt_port = raw_dst[3];
+            }
+        }
+    }
+
+    /* Fallback to active external link port if frame was flooded without MAC_FLT port tag */
+    if ((swt_port < SRP_SJA1110_FIRST_SW_PORT) || (swt_port > SRP_SJA1110_NUM_BR_PORTS))
+    {
+        if (g_srp_port_link_up[3])
+        {
+            swt_port = 4U;
+        }
+        else
+        {
+            uint8 idx;
+            for (idx = 0U; idx < SRP_SJA1110_NUM_BR_PORTS; idx++)
+            {
+                if (g_srp_port_link_up[idx])
+                {
+                    swt_port = (uint8)(idx + 1U);
+                    break;
+                }
+            }
+        }
+    }
+
     if ((swt_port < SRP_SJA1110_FIRST_SW_PORT) || (swt_port > SRP_SJA1110_NUM_BR_PORTS))
     {
         return TRUE;
@@ -1484,6 +1705,30 @@ boolean SRP_PORT_RxIndication(uint8 u8CtrlIdx,
     {
         return TRUE;
     }
+
+#if (SRP_CFG_SINGLE_CABLE_TALKER_REMAP == 1U)
+    /* Single-cable lab topology support:
+     * When only SwitchPort 4 is wired to a PC and SwitchPort 1 has no external link,
+     * remap incoming MSRP Talker Advertise (AttributeType == 1) on SwitchPort 4 to SwitchPort 1
+     * and ensure both ports have SR Class A Domain registered so IEEE 802.1Qat Split Horizon
+     * forwards the Talker Advertise out SwitchPort 4 and pairs with Listener Ready on SwitchPort 4.
+     */
+    if ((inner_ethertype == ETHERTYPE_MSRP) && (swt_port == 4U) && (pdu_len >= 2U) && (pdu_ptr[1] == 0x01U))
+    {
+        if ((!g_srp_port_link_up[0]) || g_srp_port_force_up[0])
+        {
+            if (!g_srp_port_force_up[0])
+            {
+                srp_force_port_operational(1U, 1000000000ULL);
+            }
+            (void)srp_inject_rx_pdu(1U, ETHERTYPE_MSRP, g_msrp_mc_mac, cpu8PhysAddr,
+                                    g_msrp_domain_class_a_pdu, (uint16)sizeof(g_msrp_domain_class_a_pdu));
+            (void)srp_inject_rx_pdu(4U, ETHERTYPE_MSRP, g_msrp_mc_mac, cpu8PhysAddr,
+                                    g_msrp_domain_class_a_pdu, (uint16)sizeof(g_msrp_domain_class_a_pdu));
+            swt_port = 1U;
+        }
+    }
+#endif
 
     logical_port = (unsigned int)swt_port + 1U;
 
@@ -1510,6 +1755,7 @@ boolean SRP_PORT_RxIndication(uint8 u8CtrlIdx,
             g_srp_rx_ring[g_srp_rx_head] = desc;
             g_srp_rx_head = (uint8_t)((g_srp_rx_head + 1U) % SRP_RX_QUEUE_DEPTH);
             g_srp_rx_count++;
+            g_srp_rx_pkt_cnt++;
             desc = NULL;
         }
         taskEXIT_CRITICAL();
@@ -1541,7 +1787,18 @@ void SRP_PORT_Periodic(void)
 
     now_tick = xTaskGetTickCount();
 
-    /* 1. Dispatch queued MRP RX frames to srp_net_rx */
+    /* 1. Dispatch pending IPC messages first so port operational state changes precede RX frames */
+    for (i = 0U; i < (uint32_t)IPC_ID_MAX; i++)
+    {
+        if (g_srp_ipc_channels[i].registered &&
+            (g_srp_ipc_channels[i].rx != NULL) &&
+            (g_srp_ipc_channels[i].count > 0U))
+        {
+            ipc_rx(g_srp_ipc_channels[i].rx);
+        }
+    }
+
+    /* 2. Dispatch queued MRP RX frames to srp_net_rx */
     while (g_srp_rx_count > 0U)
     {
         struct net_rx_desc *desc = NULL;
@@ -1574,7 +1831,7 @@ void SRP_PORT_Periodic(void)
         }
     }
 
-    /* 2. Dispatch pending IPC messages (MAC status, MSRP/MVRP control, Managed Objects) */
+    /* 2b. Dispatch any IPC messages generated during MRP RX processing */
     for (i = 0U; i < (uint32_t)IPC_ID_MAX; i++)
     {
         if (g_srp_ipc_channels[i].registered &&
@@ -1651,6 +1908,40 @@ void SRP_PORT_Periodic(void)
             }
         }
     }
+
+    /* 5. Update contiguous MCU telemetry snapshot for FreeMASTER / GDB / pyOCD */
+    {
+        uint8_t link_mask = 0U;
+        for (i = 0U; i < SRP_SJA1110_NUM_BR_PORTS; i++)
+        {
+            if (g_srp_port_link_up[i])
+            {
+                link_mask |= (uint8_t)(1U << i);
+            }
+        }
+        g_srp_telemetry.magic               = 0x534A4131UL;
+        g_srp_telemetry.uptime_ticks        = (uint32_t)now_tick;
+        g_srp_telemetry.free_heap_bytes     = (uint32_t)xPortGetFreeHeapSize();
+        g_srp_telemetry.min_free_heap_bytes = (uint32_t)xPortGetMinimumEverFreeHeapSize();
+        g_srp_telemetry.port_link_mask      = link_mask;
+        g_srp_telemetry.selftest_done       = g_srp_selftest_done;
+        g_srp_telemetry.active_vlan_id      = g_srp_last_active_vid;
+        g_srp_telemetry.port4_cbs_slope_bps = g_srp_port4_last_cbs_bps;
+        g_srp_telemetry.rx_mrp_packets      = g_srp_rx_pkt_cnt;
+        g_srp_telemetry.tx_mrp_packets      = g_srp_tx_pkt_cnt;
+
+        g_srp_telemetry.active_tcam_dest_ports = 0U;
+        for (i = 0U; i < SRP_MAX_FDB_ENTRIES; i++)
+        {
+            if (g_srp_fdb_table[i].in_use && (g_srp_fdb_table[i].dest_ports != 0U))
+            {
+                g_srp_telemetry.active_vlan_id         = g_srp_fdb_table[i].vid;
+                g_srp_telemetry.active_tcam_dest_ports = g_srp_fdb_table[i].dest_ports;
+                os_memcpy((void *)g_srp_telemetry.active_tcam_mac, g_srp_fdb_table[i].mac, 6U);
+                break;
+            }
+        }
+    }
 }
 
 int SRP_PORT_SendIpcMessage(unsigned int ipc_id, uint32_t type, const void *payload, unsigned int len)
@@ -1699,28 +1990,143 @@ volatile int g_srp_selftest_cbs_res  = -1;
 
 void SRP_PORT_RunSelfTest(void)
 {
-    struct genavb_vlan_port_map vmap;
-    uint8_t test_stream_da[6] = {0x91U, 0xE0U, 0xF0U, 0x00U, 0xFEU, 0x00U};
+    /* Simulated Talker MAC on SwitchPort 1 & Listener MAC on SwitchPort 4 */
+    static const uint8_t talker_src_mac[6]   = {0x00U, 0x11U, 0x22U, 0x33U, 0x44U, 0x01U};
+    static const uint8_t listener_src_mac[6] = {0x00U, 0x11U, 0x22U, 0x33U, 0x44U, 0x04U};
+    static const uint8_t test_stream_da[6]   = {0x91U, 0xE0U, 0xF0U, 0x00U, 0xFEU, 0x00U};
+
+    /* 1. IEEE 802.1Q MVRP JoinIn (VID = 2) PDU (0x88F5) */
+    static const uint8_t mvrp_join_vid2_pdu[] = {
+        0x00U,             /* ProtocolVersion = 0 */
+        0x01U,             /* AttributeType = VID (1) */
+        0x02U,             /* AttributeLength = 2 */
+        0x00U, 0x01U,      /* VectorHeader: LeaveAll=0, NumberOfValues=1 */
+        0x00U, 0x02U,      /* FirstValue: VID = 2 */
+        0x24U,             /* ThreePackedEvent: JoinIn (1 * 36 = 36 = 0x24) */
+        0x00U, 0x00U,      /* Vector EndMark */
+        0x00U, 0x00U       /* PDU EndMark */
+    };
+
+    /* 2. IEEE 802.1Qat MSRP Talker Advertise PDU (0x22EA)
+     *    StreamID = 00:11:22:33:44:55:00:01, StreamDA = 91:E0:F0:00:FE:00,
+     *    VID = 2, MaxFrameSize = 128, MaxIntervalFrames = 1, Priority = 3 (Class A), Rank = 1, Latency = 1000
+     */
+    static const uint8_t msrp_talker_adv_pdu[] = {
+        0x00U,             /* ProtocolVersion = 0 */
+        0x01U,             /* AttributeType = Talker Advertise (1) */
+        25U,               /* AttributeLength = 25 */
+        0x00U, 30U,        /* AttributeListLength = 2 + 25 + 1 + 2 = 30 */
+        0x00U, 0x01U,      /* VectorHeader: LeaveAll=0, NumberOfValues=1 */
+        0x00U, 0x11U, 0x22U, 0x33U, 0x44U, 0x55U, 0x00U, 0x01U, /* StreamID */
+        0x91U, 0xE0U, 0xF0U, 0x00U, 0xFEU, 0x00U,               /* StreamDA */
+        0x00U, 0x02U,      /* VLAN ID = 2 */
+        0x00U, 0x80U,      /* MaxFrameSize = 128 */
+        0x00U, 0x01U,      /* MaxIntervalFrames = 1 */
+        0x70U,             /* Priority = 3 (bits 7..5), Rank = 1 (bit 4) */
+        0x00U, 0x00U, 0x03U, 0xE8U, /* AccumulatedLatency = 1000 ns */
+        0x24U,             /* ThreePackedEvent: JoinIn (36 = 0x24) */
+        0x00U, 0x00U,      /* Vector EndMark */
+        0x00U, 0x00U       /* PDU EndMark */
+    };
+
+    /* 3. IEEE 802.1Qat MSRP Listener Ready PDU (0x22EA)
+     *    StreamID = 00:11:22:33:44:55:00:01, ThreePacked = JoinIn (0x24), FourPacked = Ready (2 * 64 = 0x80)
+     */
+    static const uint8_t msrp_listener_ready_pdu[] = {
+        0x00U,             /* ProtocolVersion = 0 */
+        0x03U,             /* AttributeType = Listener (3) */
+        8U,                /* AttributeLength = 8 */
+        0x00U, 14U,        /* AttributeListLength = 2 + 8 + 1 + 1 + 2 = 14 */
+        0x00U, 0x01U,      /* VectorHeader: LeaveAll=0, NumberOfValues=1 */
+        0x00U, 0x11U, 0x22U, 0x33U, 0x44U, 0x55U, 0x00U, 0x01U, /* StreamID */
+        0x24U,             /* ThreePackedEvent: JoinIn (1 * 36 = 0x24) */
+        0x80U,             /* FourPackedEvent: Ready (2 * 64 = 0x80) */
+        0x00U, 0x00U,      /* Vector EndMark */
+        0x00U, 0x00U       /* PDU EndMark */
+    };
+
+    struct genavb_vlan_port_map vlan_map[SRP_SJA1110_NUM_BR_PORTS];
+    struct genavb_fdb_port_map  fdb_map[SRP_SJA1110_NUM_BR_PORTS];
+    genavb_fdb_status_t fdb_status = GENAVB_FDB_STATUS_OTHER;
+    bool is_dyn = false;
+    uint32_t i;
 
     if (g_srp_bridge_ctx == NULL)
     {
         return;
     }
 
-    /* 1. Test MVRP dynamic VLAN registration (VID = 2, via Logical Port 5 = SwitchPort 4) */
-    vmap.port_id = 5U;   /* GenAVB logical_port 5 = SJA1110 SwitchPortIdx 4 */
-    vmap.control = GENAVB_VLAN_ADMIN_CONTROL_REGISTERED;
-    g_srp_selftest_vlan_res = vlan_update(2U, true, &vmap);
+    /* Ensure SwitchPort 1 (Talker ingress) and SwitchPort 4 (Listener ingress) are operational in SRP */
+    srp_force_port_operational(1U, 1000000000ULL);
+    srp_force_port_operational(4U, 1000000000ULL);
+    for (i = 0U; i < (uint32_t)IPC_ID_MAX; i++)
+    {
+        if (g_srp_ipc_channels[i].registered && (g_srp_ipc_channels[i].rx != NULL) && (g_srp_ipc_channels[i].count > 0U))
+        {
+            ipc_rx(g_srp_ipc_channels[i].rx);
+        }
+    }
 
-    /* 2. Test L2 TCAM dynamic stream multicast forwarding rule */
-    /* Stream DA = 91:E0:F0:00:FE:00, VID = 2, forward to SwitchPort 4 */
-    g_srp_selftest_fdb_res = fdb_update(5U /* SwitchPort 4 */, test_stream_da, 2U,
-                                        true, GENAVB_FDB_PORT_CONTROL_FORWARDING);
+    /* Inject MVRP JoinIn (VID=2), MSRP Domain (Class A), Talker Advertise (Port 1), and Listener Ready (Port 4) */
+    (void)srp_inject_rx_pdu(4U, ETHERTYPE_MVRP, g_mvrp_mc_mac, listener_src_mac,
+                            mvrp_join_vid2_pdu, (uint16)sizeof(mvrp_join_vid2_pdu));
+    (void)srp_inject_rx_pdu(1U, ETHERTYPE_MSRP, g_msrp_mc_mac, talker_src_mac,
+                            g_msrp_domain_class_a_pdu, (uint16)sizeof(g_msrp_domain_class_a_pdu));
+    (void)srp_inject_rx_pdu(4U, ETHERTYPE_MSRP, g_msrp_mc_mac, listener_src_mac,
+                            g_msrp_domain_class_a_pdu, (uint16)sizeof(g_msrp_domain_class_a_pdu));
+    (void)srp_inject_rx_pdu(1U, ETHERTYPE_MSRP, g_msrp_mc_mac, talker_src_mac,
+                            msrp_talker_adv_pdu, (uint16)sizeof(msrp_talker_adv_pdu));
+    (void)srp_inject_rx_pdu(4U, ETHERTYPE_MSRP, g_msrp_mc_mac, listener_src_mac,
+                            msrp_listener_ready_pdu, (uint16)sizeof(msrp_listener_ready_pdu));
 
-    /* 3. Test IEEE 802.1Qav CBS hardware shaper offload */
-    /* SwitchPort 4, SR Class A (Traffic Class 7, Priority 3), IdleSlope = 16.384 Mbps */
-    g_srp_selftest_cbs_res = common_fqtss_stream_add(5U /* SwitchPort 4 */, NULL, 2U, 3U,
-                                                    16384000ULL, true);
+    /* Dispatch queued MRP frames through the real MVRP and MSRP state machines */
+    while (g_srp_rx_count > 0U)
+    {
+        struct net_rx_desc *desc = NULL;
+        struct net_rx *rx = NULL;
 
-    g_srp_selftest_done = 1U;
+        taskENTER_CRITICAL();
+        if (g_srp_rx_count > 0U)
+        {
+            desc = g_srp_rx_ring[g_srp_rx_tail];
+            g_srp_rx_tail = (uint8_t)((g_srp_rx_tail + 1U) % SRP_RX_QUEUE_DEPTH);
+            g_srp_rx_count--;
+        }
+        taskEXIT_CRITICAL();
+
+        if (desc != NULL)
+        {
+            if (desc->port < CFG_MAX_LOGICAL_PORTS)
+            {
+                rx = g_srp_net_rx_by_port[desc->port];
+            }
+            if ((rx != NULL) && (rx->func != NULL))
+            {
+                rx->func(rx, desc);
+            }
+            else
+            {
+                net_rx_free(desc);
+            }
+        }
+    }
+
+    /* Verify hardware offload results produced by the MVRP and MSRP state machines */
+    g_srp_selftest_vlan_res = vlan_read(2U, &is_dyn, vlan_map);
+    g_srp_selftest_fdb_res  = fdb_read((uint8_t *)test_stream_da, 2U, &is_dyn, fdb_map, &fdb_status);
+    g_srp_selftest_cbs_res  = (g_srp_port4_last_cbs_bps > 0U) ? 0 : -1;
+    g_srp_selftest_done     = 1U;
+    g_srp_telemetry.selftest_done       = 1U;
+    g_srp_telemetry.active_vlan_id      = g_srp_last_active_vid;
+    g_srp_telemetry.port4_cbs_slope_bps = g_srp_port4_last_cbs_bps;
+    for (i = 0U; i < SRP_MAX_FDB_ENTRIES; i++)
+    {
+        if (g_srp_fdb_table[i].in_use && (g_srp_fdb_table[i].dest_ports != 0U))
+        {
+            g_srp_telemetry.active_vlan_id         = g_srp_fdb_table[i].vid;
+            g_srp_telemetry.active_tcam_dest_ports = g_srp_fdb_table[i].dest_ports;
+            os_memcpy((void *)g_srp_telemetry.active_tcam_mac, g_srp_fdb_table[i].mac, 6U);
+            break;
+        }
+    }
 }

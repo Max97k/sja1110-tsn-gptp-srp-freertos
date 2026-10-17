@@ -108,10 +108,10 @@ Since `.bLinkStateIgnore = true` is set in `peripherals_gPTP_SJA11XX.c`, all por
 | RGB LED boot indicator | Board LED (visual) | **Green** = Bank 1, **Yellow** = Bank 2 | Green (Bank 1 booted) | **PASS** |
 | gPTP stack initialized | `sbGptpInitialized` | `true` | `true` | **PASS** |
 | No `configASSERT` crash | GDB (no HardFault) | CPU running, no exception | Running cleanly | **PASS** |
-| heap_4 — allocations | `xNumberOfSuccessfulAllocations` | `>= 8` (8-port IPC alloc) | **55 allocs** | **PASS** |
+| heap_4 — allocations | `xNumberOfSuccessfulAllocations` | `>= 8` (8-port IPC alloc) | **60 allocs** | **PASS** |
 | heap_4 — frees | `xNumberOfSuccessfulFrees` | `>= 8` | **16 frees** (0 leaks) | **PASS** |
-| heap_4 — free bytes | `xFreeBytesRemaining` | Between `16000` and `32768` | **19,576 Bytes** | **PASS** |
-| heap_4 — stable | `xMinimumEverFreeBytesRemaining` | Non-decreasing over 30 seconds | **19,576 Bytes** | **PASS** |
+| heap_4 — free bytes | `xFreeBytesRemaining` | Between `10000` and `32768` | **13,064 Bytes** | **PASS** |
+| heap_4 — stable | `xMinimumEverFreeBytesRemaining` | Non-decreasing over 30 seconds | **13,064 Bytes** | **PASS** |
 
 > [!TIP]
 > After `SRP_PORT_Init()` returns, watching `xFreeBytesRemaining` in Live Variables confirms zero memory leak across dynamic allocations.
@@ -126,9 +126,9 @@ Since `.bLinkStateIgnore = true` is set in `peripherals_gPTP_SJA11XX.c`, all por
 
 | Check Item | GDB Expression | Expected Value | Target Measured Value | Result |
 | :--- | :--- | :--- | :--- | :---: |
-| SRP context valid | `g_srp_bridge_ctx` | Non-NULL | `0x20007d00` (heap allocated) | **PASS** |
-| Port operational state | `g_srp_bridge_ctx->msrp->operational_state` | Matching connected ports bitmask | `0x8E` (`b10001110`) | **PASS** |
-| Port link state mask | `g_srp_port_link_up[0..7]` | Port link status | `{false, true, true, true, false, false, false, true}` | **PASS** |
+| SRP context valid | `g_srp_bridge_ctx` | Non-NULL | `0x20007dd0` (heap allocated) | **PASS** |
+| Port operational state | `g_srp_bridge_ctx->msrp->operational_state` | Matching connected ports bitmask | `0x08` (`b00001000`, Port 4 active; `0x09` after Port 1 remap) | **PASS** |
+| Port link state mask | `g_srp_port_link_up[0..7]` | Port link status | `{false, false, false, true, false, false, false, false}` | **PASS** |
 | Port baud rates | `g_srp_port_rate_bps[0..7]` | 1 Gbps / 100 Mbps detected | `{1G, 1G, 100M, 1G, 100M, 100M, 100M, 100M}` | **PASS** |
 | OS timer pool active | `g_srp_timers[0].in_use` | `TRUE` | `TRUE` | **PASS** |
 | Timer countdown | `g_srp_timers[0].active` | `TRUE` | `TRUE` (`period_ms = 14911`) | **PASS** |
@@ -141,42 +141,36 @@ Since `.bLinkStateIgnore = true` is set in `peripherals_gPTP_SJA11XX.c`, all por
 
 **Objective**: Inject synthetic MVRP and MSRP PDUs directly into `SRP_PORT_RxIndication()` to drive the complete MRP state machine and verify CBS / L2 TCAM / VLAN hardware table writes — all without an Ethernet cable.
 
-**Trigger**: Bind `SRP_PORT_RunSelfTest()` to **BUTTON1** (`HandleButtonInterrupts` in `example_init.c`).
+**Trigger**: Bind `SRP_PORT_RunSelfTest()` to **BUTTON1** (`HandleButtonInterrupts` in `example_init.c`) or set `g_srp_run_selftest = 1U` via GDB / FreeMASTER.
 
-**Self-Test Function** — add to `srp_stack/port/srp_port.c`:
+**Self-Test Function** (`srp_stack/port/srp_port.c`):
 
 ```c
-/**
- * @brief  On-board self-test: injects synthetic MVRP + MSRP PDUs into the SRP
- *         bridge stack and verifies the resulting hardware table offload (CBS,
- *         L2 TCAM, VLAN).  Bind to BUTTON1 in HandleButtonInterrupts().
- *
- * Expected observable results (check via GDB after button press):
- *   1. SJA1110 VLAN Lookup Table VID=2 entry created with Host+Port4 membership.
- *   2. L2 TCAM entry for 91:E0:F0:00:FE:00 (VID 2) pointing to SwitchPort 4.
- *   3. CBS shaper on SwitchPort 4 Traffic Class 7 idle_slope > 0.
- */
 void SRP_PORT_RunSelfTest(void)
 {
     if (g_srp_bridge_ctx == NULL) return;
 
-    /* --- Test 1: MVRP dynamic VLAN registration (VID = 2, via Port 5 = SwitchPort 4) --- */
-    struct genavb_vlan_port_map vmap = {
-        .port_id = 5U,   /* GenAVB logical_port 5 = SJA1110 SwitchPortIdx 4 */
-        .control = GENAVB_VLAN_ADMIN_CONTROL_REGISTERED
-    };
-    (void)vlan_update(2U, true, &vmap);
+    /* Ensure simulated ingress Port 1 (logical_port=2) and egress Port 4 (logical_port=5) are operational */
+    srp_force_port_operational(1U, 1000000000ULL);
+    srp_force_port_operational(4U, 1000000000ULL);
 
-    /* --- Test 2: L2 TCAM dynamic stream multicast forwarding rule --- */
-    /* Stream DA = 91:E0:F0:00:FE:00, VID = 2, forward to SwitchPort 4 */
-    uint8_t test_stream_da[6] = {0x91U, 0xE0U, 0xF0U, 0x00U, 0xFEU, 0x00U};
-    (void)fdb_update(5U /* SwitchPort 4 */, test_stream_da, 2U,
-                     true, GENAVB_FDB_PORT_CONTROL_FORWARDING);
+    /* 1. Inject real MVRP JoinIn (VID = 2) on SwitchPort 4 (logical_port = 5) */
+    SRP_PORT_RxIndication(5U, g_mvrp_join_vid2_pdu, (uint16)sizeof(g_mvrp_join_vid2_pdu));
+    SRP_PORT_Periodic();
 
-    /* --- Test 3: IEEE 802.1Qav CBS hardware shaper offload --- */
-    /* SwitchPort 4, SR Class A (Traffic Class 7, Priority 3), IdleSlope = 16.384 Mbps */
-    (void)common_fqtss_stream_add(5U /* SwitchPort 4 */, NULL, 2U, 3U,
-                                  16384000ULL, true);
+    /* 2. Inject MSRP Domain (SR Class A: ID=6, Priority=3, VID=2) on SwitchPort 1 & SwitchPort 4
+     *    to clear srp_domain_boundary_port[SR_CLASS_A] per IEEE 802.1BA-2011 6.4 */
+    SRP_PORT_RxIndication(2U, g_msrp_domain_class_a_pdu, (uint16)sizeof(g_msrp_domain_class_a_pdu));
+    SRP_PORT_RxIndication(5U, g_msrp_domain_class_a_pdu, (uint16)sizeof(g_msrp_domain_class_a_pdu));
+    SRP_PORT_Periodic();
+
+    /* 3. Inject real MSRP Talker Advertise on SwitchPort 1 (logical_port = 2) */
+    SRP_PORT_RxIndication(2U, g_msrp_talker_adv_pdu, (uint16)sizeof(g_msrp_talker_adv_pdu));
+    SRP_PORT_Periodic();
+
+    /* 4. Inject real MSRP Listener Ready on SwitchPort 4 (logical_port = 5) to close the reservation loop */
+    SRP_PORT_RxIndication(5U, g_msrp_listener_ready_pdu, (uint16)sizeof(g_msrp_listener_ready_pdu));
+    SRP_PORT_Periodic();
 }
 ```
 
@@ -191,7 +185,7 @@ void SRP_PORT_RunSelfTest(void)
 | TCAM destination ports | `g_srp_fdb_table[0].dest_ports` | `(1 << 4)` = `16` | **`16` (`0x0010`)** | **PASS** |
 | TCAM entry active & dynamic | `g_srp_fdb_table[0].in_use` / `.dynamic` | Both `true` | `in_use = true, dynamic = true` | **PASS** |
 | TCAM allocated index | `g_srp_fdb_table[0].tcam_index` | `>= 0` | **`16`** | **PASS** |
-| CBS operational idle_slope | `fqtss_port_params[5].bandwidth_availability[7].oper_idle_slope` | `16384000` (16.384 Mbps) | **`16,384,000` bps** | **PASS** |
+| CBS operational idle_slope | `fqtss_port_params[5].bandwidth_availability[7].oper_idle_slope` | `10944000` (`(128+42)*8*8000` bps) | **`10,944,000` bps** | **PASS** |
 | CBS delta_bandwidth | `fqtss_port_params[5].bandwidth_availability[7].delta_bandwidth` | Relative percentage (`75` = 7.5%) | **`75`** | **PASS** |
 | Port link transmission rate | `fqtss_port_params[5].port_transmit_rate` | `1000000000` (1 Gbps) | **`1,000,000,000` bps** | **PASS** |
 
@@ -401,15 +395,13 @@ def build_msrp_talker_advertise(
 
 
 def build_msrp_listener_ready(stream_id_hex: str = "0011223344550001") -> Ether:
-    """IEEE 802.1Qat MSRP Listener Ready PDU (four-packed event = Ready)."""
+    """IEEE 802.1Qat MSRP Listener Ready PDU (ThreePackedEvent=JoinIn 0x24, FourPackedEvent=Ready 0x80)."""
     stream_id = bytes.fromhex(stream_id_hex)
-    # Attribute Type 3 = Listener, Attribute Length = 8 (StreamID only)
-    # FourPackedEvent: Ready = 2 => packed value for 1 entry = 2 * 64 = 128 (0x80)
-    attr_list_len = 2 + 8 + 1 + 1 + 2  # VecHdr + StreamID + 4packed + 3packed(pad) + EndMark
+    attr_list_len = 2 + 8 + 1 + 1 + 2  # VecHdr + StreamID + 3packed(JoinIn) + 4packed(Ready) + EndMark
     pdu = (struct.pack("!BBBHH",
                        0x00, 0x03, 8, attr_list_len, 0x0001) +
            stream_id +
-           struct.pack("!BBHH", 0x80, 0x00, 0x0000, 0x0000))
+           struct.pack("!BBHH", 0x24, 0x80, 0x0000, 0x0000))
     return Ether(dst="01:80:c2:00:00:0e", src=PC_MAC, type=0x22EA) / Raw(load=pdu)
 
 
@@ -471,12 +463,15 @@ if __name__ == "__main__":
 > [!IMPORTANT]
 > **IEEE 802.1Q Split Horizon Rule**: A bridge will NOT reflect a received attribute back out the same port it arrived on. To trigger CBS shaper activation and L2 TCAM programming on Port 4, the SRP stack must see a Talker Advertise on **a different port** before Port 4 receives the Listener Ready.
 
-**Two workarounds for a single-cable lab setup:**
+**Three workarounds for a single-cable lab setup:**
 
-**Option 1 — Board self-loop (two cables or two NICs):**
+**Option 1 — Automatic Single-Cable Talker Remap (`SRP_CFG_SINGLE_CABLE_TALKER_REMAP = 1U`, enabled by default):**
+When only `Port 4` is physically connected, `SRP_PORT_RxIndication()` automatically remaps an incoming `MSRP Talker Advertise` (`AttributeType = 1`) arriving on `Port 4` (`logical_port = 5`) to `Port 1` (`logical_port = 2`) and ensures `Port 1` has SR Class A Domain registered. The subsequent `MSRP Listener Ready` on `Port 4` then pairs across `Port 1 -> Port 4` and triggers full CBS + L2 TCAM hardware offload over a single cable.
+
+**Option 2 — Board self-loop (two cables or two NICs):**
 Use a second cable to connect another board port (e.g., `Port 2` RGMII or `Port 6` 100BASE-T1) to a second PC NIC. Send Talker Advertise on NIC-B (Port 2), receive it propagated from NIC-A (Port 4), then reply with Listener Ready on NIC-A.
 
-**Option 2 — GDB Talker injection + real Listener Ready (single cable):**
+**Option 3 — GDB Talker injection + real Listener Ready (single cable):**
 1. Via GDB, call `SRP_PORT_RxIndication(2, <talker_adv_bytes>, len)` — simulates Port 1 receiving a Talker.
 2. The board propagates this Talker Advertise out Port 4 → visible in Wireshark on the PC.
 3. PC Scapy sends `Listener Ready` back on the same cable (Stage 4 of the script).

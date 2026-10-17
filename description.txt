@@ -46,9 +46,9 @@
              For the project to work correctly, several DIP switches must be configured
              to ensure signals are routed as expected by the software.
 
-             DIP Switch Settings:
-             - SW7 = ON (SJA1110 BOOT_OPTION1)
-             - All other switches not mentioned below should be set to OFF
+             DIP Switch Settings (SW2 per UM12269 Table 2 & Table 3):
+             - SW2.6 = ON, SW2.7 = ON (SJA1110 BOOT_OPTION1 + NVM SPI Flash Boot)
+             - All other switches on SW2 should be set to OFF
 
              Jumper Positions (must be set as follows):
              - J58: 1-2

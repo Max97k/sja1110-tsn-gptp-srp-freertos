@@ -396,7 +396,9 @@ static void toggleAliveLED(TimerHandle_t xTimer)
     /* Toggle ALIVE LED */
     regVal = (uint32)(1U << GPIO_PIN_10);
 
+    SJA1110_LockSwitch();
     Switch_Ip_Write(SJA1110_SWT_ID, 1U, (GPIO_TGL_ADDR), &regVal);
+    SJA1110_UnlockSwitch();
 }
 
 static void gPTPTask(void *pvParameters)
@@ -405,10 +407,12 @@ static void gPTPTask(void *pvParameters)
 
     while (1)
     {
+        SJA1110_LockSwitch();
         GPTP_TimerPeriodic();
         Eth_Main();
         Eth_Poll();
         SRP_PORT_Periodic();
+        SJA1110_UnlockSwitch();
 
         /* Poll FLASH write function. */
         FLASH_Write_Poll();
@@ -425,6 +429,7 @@ static void gpioHandleTask(void *pvParameters)
 
     while (1)
     {
+        SJA1110_LockSwitch();
         /* Read PHY GPIO interrupt flags */
         Switch_Ip_Read(SJA1110_SWT_ID, 1U, (GPIO_REG_IRQ_ADDR), &gpioFlags);
 
@@ -442,6 +447,7 @@ static void gpioHandleTask(void *pvParameters)
             /* Clear all interrupt flags */
             Switch_Ip_Write(SJA1110_SWT_ID, 1U, (GPIO_REG_IRQ_ADDR), &gpioFlags);
         }
+        SJA1110_UnlockSwitch();
 
         vTaskDelay(pdMS_TO_TICKS(gpioHandleTask_SLEEP_TIME));
     }
@@ -489,8 +495,10 @@ int main(void)
     /* Initialize IEEE 802.1Qat SRP Stack (Bridge Mode: MSRP, MVRP, MMRP + FQTSS/CBS). */
     (void)SRP_PORT_Init();
 
-    /* Execute built-in hardware self-test (Milestone T3: MVRP, FDB TCAM, CBS offload) */
+#if (SRP_CFG_RUN_SELFTEST_ON_BOOT == 1U)
+    /* Optional boot-time self-test (disabled by default to keep HW VLAN/TCAM/CBS tables clean at boot) */
     SRP_PORT_RunSelfTest();
+#endif
 
     if (sbGptpInitialized)
     {

@@ -25,6 +25,9 @@ extern "C" {
 
 #include "example_init.h"
 #include "pcal/pcal9722.h"
+#include "task.h"
+#include "semphr.h"
+#include "srp_port.h"
 
 /*==================================================================================================
 *                          LOCAL TYPEDEFS (STRUCTURES, UNIONS, ENUMS)
@@ -98,6 +101,23 @@ extern "C" {
 
 extern const gptp_def_init_params_t rGptpCfgParams;
 extern const EthSwt_43_SJA11XX_ConfigType EthSwt_43_SJA11XX_PBCfgVariantPredefined;
+static SemaphoreHandle_t s_sja1110SwitchMutex = NULL;
+
+void SJA1110_LockSwitch(void)
+{
+    if ((s_sja1110SwitchMutex != NULL) && (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING))
+    {
+        (void)xSemaphoreTakeRecursive(s_sja1110SwitchMutex, portMAX_DELAY);
+    }
+}
+
+void SJA1110_UnlockSwitch(void)
+{
+    if ((s_sja1110SwitchMutex != NULL) && (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING))
+    {
+        (void)xSemaphoreGiveRecursive(s_sja1110SwitchMutex);
+    }
+}
 
 /*==================================================================================================
 *                                   LOCAL FUNCTION PROTOTYPES
@@ -183,14 +203,13 @@ void HandlePeripheralInterrupts(uint32 gpioFlags)
     }
 }
 
-extern void SRP_PORT_RunSelfTest(void);
-
 void HandleButtonInterrupts(uint32 gpioFlags)
 {
     if (gpioFlags & (1U << IRQ_SWT_BUTTON1))
     {
         SJA1110_SetRGBLed(SJA1110_LEDCOLOR_MAGENTA);
-        SRP_PORT_RunSelfTest();
+        /* Defer self-test execution to gPTPTask (SRP_PORT_Periodic) for thread safety */
+        g_srp_run_selftest = 1U;
     }
 
     if (gpioFlags & (1U << IRQ_SWT_BUTTON2))
@@ -234,12 +253,14 @@ static void SJA1110_WritePin(uint8 pin, uint16 value)
 {
     uint32 regVal;
 
+    SJA1110_LockSwitch();
     Switch_Ip_Read(SJA1110_SWT_ID, 1U, (GPIO_REG_ADDR), &regVal);
 
     regVal &= (uint32)(~(1UL << pin));
     regVal |= (uint32)(value << pin);
 
     Switch_Ip_Write(SJA1110_SWT_ID, 1U, (GPIO_REG_ADDR), &regVal);
+    SJA1110_UnlockSwitch();
 }
 
 Phy_Ip_StatusType linkUpEventCallback(uint8 phy, Phy_Ip_IrqSourceType irqSrc, Phy_Ip_IrqDefaultActionType alreadyExecutedAction)
@@ -373,6 +394,11 @@ Std_ReturnType SJA1110_DeviceInit(void)
     Std_ReturnType status;
 
     OsIf_Init(NULL_PTR);
+
+    if (s_sja1110SwitchMutex == NULL)
+    {
+        s_sja1110SwitchMutex = xSemaphoreCreateRecursiveMutex();
+    }
 
     /* Initialize the Mcu driver. */
     Mcu_Init(NULL);

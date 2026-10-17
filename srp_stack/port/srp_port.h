@@ -30,6 +30,17 @@ extern "C" {
 #define SRP_SJA1110_FIRST_LOGICAL_PORT  (2U)
 
 /**
+ * Bitmask (indexed by SwitchPortIdx 1..8) of Phyless / fixed-link ports
+ * that should be treated as Link Up when no EthTrcv GetLinkState callback is bound.
+ * Default: (1U << 4U) for SW1 Port 4 (1G SFP uplink).
+ * Set additional bits (e.g. (1U << 2U) | (1U << 3U) | (1U << 8U)) only if external
+ * xMII links on Ports 2, 3, or 8 are physically wired in your hardware setup.
+ */
+#ifndef SRP_PHYLESS_PORT_FORCE_UP_MASK
+#define SRP_PHYLESS_PORT_FORCE_UP_MASK  (1U << 4U)
+#endif
+
+/**
  * @brief Initialize the IEEE 802.1Qat (SRP: MSRP, MVRP, MMRP) stack on SJA1110.
  *
  * Initializes hardware multicast trapping for MRP protocols (01:80:C2:00:00:0E,
@@ -89,6 +100,39 @@ int SRP_PORT_SendIpcMessage(unsigned int ipc_id, uint32_t type, const void *payl
  * and CBS hardware shaper configuration on SwitchPort 4.
  */
 void SRP_PORT_RunSelfTest(void);
+
+/** Set to 1U only for Scenario A standalone JTAG boot self-test; keep 0U for clean network boot */
+#ifndef SRP_CFG_RUN_SELFTEST_ON_BOOT
+#define SRP_CFG_RUN_SELFTEST_ON_BOOT            (0U)
+#endif
+
+/**
+ * Enable single-cable closed-loop MSRP Talker Advertise ingress remap on SwitchPort 4:
+ * When only one Ethernet cable is connected to Port 4 and Port 1 is unplugged, an incoming
+ * MSRP Talker Advertise on Port 4 is logically mapped to Port 1 so IEEE 802.1Qat Split Horizon
+ * allows propagating the Talker Advertise out Port 4 and pairing with Listener Ready on Port 4.
+ */
+#ifndef SRP_CFG_SINGLE_CABLE_TALKER_REMAP
+#define SRP_CFG_SINGLE_CABLE_TALKER_REMAP       (1U)
+#endif
+
+/** Contiguous MCU telemetry snapshot readable via FreeMASTER / GDB / pyOCD */
+typedef struct {
+    uint32_t magic;                  /* 0x534A4131 ('SJA1') */
+    uint32_t uptime_ticks;           /* FreeRTOS xTaskGetTickCount() */
+    uint32_t free_heap_bytes;        /* xPortGetFreeHeapSize() */
+    uint32_t min_free_heap_bytes;    /* xPortGetMinimumEverFreeHeapSize() */
+    uint8_t  port_link_mask;         /* Bitmask of SwitchPort 1..8 link state (bit 0 = Port 1) */
+    uint8_t  selftest_done;          /* 1 if SRP_PORT_RunSelfTest completed */
+    uint16_t active_vlan_id;         /* Dynamically registered VID (e.g. 2) or 0 */
+    uint16_t active_tcam_dest_ports; /* Destination port mask of first active FDB entry */
+    uint8_t  active_tcam_mac[6];     /* Destination MAC of first active FDB entry */
+    uint32_t port4_cbs_slope_bps;    /* Active CBS idleSlope (bps) on SwitchPort 4 */
+    uint32_t rx_mrp_packets;         /* Total MRP PDUs received by SRP_PORT */
+    uint32_t tx_mrp_packets;         /* Total MRP PDUs transmitted by SRP_PORT */
+} srp_mcu_telemetry_t;
+
+extern volatile srp_mcu_telemetry_t g_srp_telemetry;
 
 /** Global trigger and status flags for FreeMASTER / Debugger / Self-Test */
 extern volatile uint8_t g_srp_run_selftest;

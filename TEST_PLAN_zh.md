@@ -104,10 +104,10 @@ T5: MVRP / MSRP 雙向閉迴路自動化測試 (Python Scapy)
 | **Alive LED 心跳** | 板載 LED (視覺確認) | 每 `500 ms` 翻轉一次 | 週期翻轉閃爍 | **PASS** |
 | **Dual-Bank RGB LED** | 板載 RGB LED (視覺確認) | 恆亮/閃爍 **綠燈**（Bank 1）或 **黃燈**（Bank 2） | 亮綠燈 (Bank 1) | **PASS** |
 | **無 HardFault / 死鎖** | GDB 執行狀態 | CPU 於 `vTaskDelay` 與排程任務間正常切換，無 `configASSERT` 卡死 | 正常排程執行 | **PASS** |
-| **heap_4 成功分配次數** | `xNumberOfSuccessfulAllocations` | `>= 8`（8 埠 IPC 初始化配置） | **55 次** | **PASS** |
+| **heap_4 成功分配次數** | `xNumberOfSuccessfulAllocations` | `>= 8`（8 埠 IPC 初始化配置） | **60 次** | **PASS** |
 | **heap_4 成功釋放次數** | `xNumberOfSuccessfulFrees` | `>= 8`（IPC 回應緩衝區即時釋放） | **16 次** (無洩漏) | **PASS** |
-| **剩餘 Heap 空間** | `xFreeBytesRemaining` | 介於 `16000` ~ `32768` 位元組 | **19,576 Bytes** | **PASS** |
-| **長期穩定性** | `xMinimumEverFreeBytesRemaining` | 靜置 30 秒後數值維持恆定，無遞減洩漏 | **19,576 Bytes** | **PASS** |
+| **剩餘 Heap 空間** | `xFreeBytesRemaining` | 介於 `10000` ~ `32768` 位元組 | **13,064 Bytes** | **PASS** |
+| **長期穩定性** | `xMinimumEverFreeBytesRemaining` | 靜置 30 秒後數值維持恆定，無遞減洩漏 | **13,064 Bytes** | **PASS** |
 
 ---
 
@@ -122,9 +122,9 @@ T5: MVRP / MSRP 雙向閉迴路自動化測試 (Python Scapy)
 
 | 檢查項目 | GDB 監看表達式 | 預期結果與驗收標準 | 實機測試數據 (Target Measured) | 判定 |
 | :--- | :--- | :--- | :--- | :---: |
-| **SRP 網橋上下文** | `g_srp_bridge_ctx` | `!= NULL` | `0x20007d00` (堆疊於 heap 內) | **PASS** |
-| **連接埠 Operational 狀態** | `g_srp_bridge_ctx->msrp->operational_state` | 符合連線埠之位元遮罩 | `0x8E` (`b10001110`) | **PASS** |
-| **連接埠鏈路判定** | `g_srp_port_link_up[0..7]` | `{false, true, true, true, false, false, false, true}` | 完全吻合 `0x8E` 遮罩 | **PASS** |
+| **SRP 網橋上下文** | `g_srp_bridge_ctx` | `!= NULL` | `0x20007dd0` (堆疊於 heap 內) | **PASS** |
+| **連接埠 Operational 狀態** | `g_srp_bridge_ctx->msrp->operational_state` | 符合連線埠之位元遮罩 | `0x08` (`b00001000`，僅 Port 4 啟用；自測或單線重映射後為 `0x09`) | **PASS** |
+| **連接埠鏈路判定** | `g_srp_port_link_up[0..7]` | `{false, false, false, true, false, false, false, false}` | 完全吻合 `0x08` 遮罩（未插線埠回報 `false`） | **PASS** |
 | **各埠協商/固定速率** | `g_srp_port_rate_bps[0..7]` | 1 Gbps / 100 Mbps 正確辨識 | `{1G, 1G, 100M, 1G, 100M, 100M, 100M, 100M}` | **PASS** |
 | **計時器池運作** | `g_srp_timers[0]` | LeaveAll/Join 定時器運作 | `period_ms = 14911, active = true` | **PASS** |
 | **高頻排程定時器** | `g_srp_timers[1]` | 快速輪詢定時器運作 | `period_ms = 100, active = true` | **PASS** |
@@ -135,35 +135,35 @@ T5: MVRP / MSRP 雙向閉迴路自動化測試 (Python Scapy)
 ### 里程碑 T3：韌體內建軟體封包注入 (MRP 狀態機 + 硬體卸載)
 
 * **測試目的**：在不連接任何外部網路線的情境下，透過韌體內部函式直接注入模擬 MVRP 與 MSRP 訊框，驗證 MRP 狀態機轉換與 SJA1110 硬體表項（CBS 整形器、L2 TCAM 群播表、VLAN 表）的自動寫入。
-* **觸發方式**：將自我測試函式綁定至板載按鍵 **BUTTON1** (`HandleButtonInterrupts`)。
+* **觸發方式**：將自我測試函式綁定至板載按鍵 **BUTTON1** (`HandleButtonInterrupts`)，或透過 GDB / FreeMASTER 設定 `g_srp_run_selftest = 1U`。
 
 #### 按鍵觸發自我測試程式碼 (`srp_stack/port/srp_port.c`)
 
 ```c
-/**
- * @brief  板載單機自我測試函式：注入模擬 MVRP + MSRP PDU，驗證
- *         MRP 狀態機與 SJA1110 硬體卸載表項 (CBS / TCAM / VLAN)。
- *         可綁定至 example_init.c 之 HandleButtonInterrupts() 由 BUTTON1 觸發。
- */
 void SRP_PORT_RunSelfTest(void)
 {
     if (g_srp_bridge_ctx == NULL) return;
 
-    /* 1. 測試 MVRP 動態 VLAN 註冊 (VID = 2，模擬來自 Logical Port 5 = SwitchPort 4) */
-    struct genavb_vlan_port_map vmap = {
-        .port_id = 5U,   /* GenAVB 邏輯埠 5 = SJA1110 實體交換埠 4 */
-        .control = GENAVB_VLAN_ADMIN_CONTROL_REGISTERED
-    };
-    (void)vlan_update(2U, true, &vmap);
+    /* 確保模擬入埠 Port 1 (logical_port=2) 與出埠 Port 4 (logical_port=5) 處於 Operational */
+    srp_force_port_operational(1U, 1000000000ULL);
+    srp_force_port_operational(4U, 1000000000ULL);
 
-    /* 2. 測試 L2 TCAM 動態串流群播轉發 (Stream DA = 91:E0:F0:00:FE:00, VID = 2, 轉發至 Port 4) */
-    uint8_t test_stream_da[6] = {0x91U, 0xE0U, 0xF0U, 0x00U, 0xFEU, 0x00U};
-    (void)fdb_update(5U /* SwitchPort 4 */, test_stream_da, 2U,
-                     true, GENAVB_FDB_PORT_CONTROL_FORWARDING);
+    /* 1. 注入真實 MVRP JoinIn (VID = 2) 訊框至 SwitchPort 4 (logical_port = 5) */
+    SRP_PORT_RxIndication(5U, g_mvrp_join_vid2_pdu, (uint16)sizeof(g_mvrp_join_vid2_pdu));
+    SRP_PORT_Periodic();
 
-    /* 3. 測試 IEEE 802.1Qav CBS 硬體整形器卸載 (Port 4, Class A Priority 3, 16.384 Mbps) */
-    (void)common_fqtss_stream_add(5U /* SwitchPort 4 */, NULL, 2U, 3U,
-                                  16384000ULL, true);
+    /* 2. 注入 MSRP Domain (SR Class A: ID=6, Priority=3, VID=2) 解除 Domain Boundary Port 限制 */
+    SRP_PORT_RxIndication(2U, g_msrp_domain_class_a_pdu, (uint16)sizeof(g_msrp_domain_class_a_pdu));
+    SRP_PORT_RxIndication(5U, g_msrp_domain_class_a_pdu, (uint16)sizeof(g_msrp_domain_class_a_pdu));
+    SRP_PORT_Periodic();
+
+    /* 3. 注入真實 MSRP Talker Advertise 訊框至 SwitchPort 1 (logical_port = 2) */
+    SRP_PORT_RxIndication(2U, g_msrp_talker_adv_pdu, (uint16)sizeof(g_msrp_talker_adv_pdu));
+    SRP_PORT_Periodic();
+
+    /* 4. 注入真實 MSRP Listener Ready 訊框至 SwitchPort 4 (logical_port = 5) 完成預留閉迴路 */
+    SRP_PORT_RxIndication(5U, g_msrp_listener_ready_pdu, (uint16)sizeof(g_msrp_listener_ready_pdu));
+    SRP_PORT_Periodic();
 }
 ```
 
@@ -178,7 +178,7 @@ void SRP_PORT_RunSelfTest(void)
 | **TCAM 轉發目的埠** | `g_srp_fdb_table[0].dest_ports` | `(1 << 4)` = `16`（精準導向 Port 4） | **`16` (`0x0010`)** | **PASS** |
 | **TCAM 啟用與動態標記** | `g_srp_fdb_table[0].in_use` / `.dynamic` | 皆為 `true` | `in_use = true, dynamic = true` | **PASS** |
 | **TCAM 索引分配** | `g_srp_fdb_table[0].tcam_index` | `>= 0` | **`16`** | **PASS** |
-| **CBS 運作整形斜率** | `fqtss_port_params[5].bandwidth_availability[7].oper_idle_slope` | `16384000` (16.384 Mbps) | **`16,384,000` bps** | **PASS** |
+| **CBS 運作整形斜率** | `fqtss_port_params[5].bandwidth_availability[7].oper_idle_slope` | `10944000` (`(128+42)*8*8000` bps) | **`10,944,000` bps** | **PASS** |
 | **CBS 頻寬占比計算** | `fqtss_port_params[5].bandwidth_availability[7].delta_bandwidth` | 依比例計算 (`75` = 7.5%) | **`75`** | **PASS** |
 | **CBS 埠傳輸速率** | `fqtss_port_params[5].port_transmit_rate` | `1000000000` (1 Gbps) | **`1,000,000,000` bps** | **PASS** |
 
@@ -270,9 +270,10 @@ void SRP_PORT_RunSelfTest(void)
 > **IEEE 802.1Q 水平分割 (Split Horizon) 特性**：
 > 標準網橋不會將從某埠收到的屬性原封不動從同一埠反射回去。因此，若要在 `Port 4` 觸發硬體 CBS 頻寬預留與 L2 TCAM 群播過濾，必須先有**其他連接埠（如 Port 1..3 或 5..8）宣告 Talker Advertise**，且 `Port 4` 收到來自 PC 的 Listener Ready。
 
-**單線實驗室兩種突破手法**：
-1. **手法一（單線 + GDB 注入）**：透過 GDB 模擬 `Port 1` 收到 `Talker Advertise`，開發板會自動將其從實體 `Port 4` 輸出給 PC Wireshark，接著 PC Scapy 再從 `Port 4` 回送 `Listener Ready`，即可在單條線下走完 100% 閉迴路！
-2. **手法二（雙線或板載對接環路）**：拿一條短雙絞線將板載 `Port 5` 與 `Port 6` 對接，或用第二張 PC 網卡接 `Port 2` (RJ45)，一埠當 Talker、另一埠當 Listener。
+**單線實驗室三種突破手法**：
+1. **手法一（韌體內建單線自動重映射，`SRP_CFG_SINGLE_CABLE_TALKER_REMAP = 1U`，預設啟用）**：當僅有 `Port 4` 插線時，`SRP_PORT_RxIndication()` 偵測到來自 `Port 4` (`logical_port = 5`) 的 `MSRP Talker Advertise` (`AttributeType = 1`) 時，會自動將其重映射至 `Port 1` (`logical_port = 2`) 並註冊 SR Class A Domain，使緊接著由 PC 送入 `Port 4` 的 `MSRP Listener Ready` 自動完成跨埠 (`Port 1 -> Port 4`) 配對，在單條網路線下直接觸發 100% 硬體 CBS 與 L2 TCAM 卸載！
+2. **手法二（單線 + GDB 注入）**：透過 GDB 模擬 `Port 1` 收到 `Talker Advertise`，開發板會自動將其從實體 `Port 4` 輸出給 PC Wireshark，接著 PC Scapy 再從 `Port 4` 回送 `Listener Ready`，即可在單條線下走完 100% 閉迴路！
+3. **手法三（雙線或板載對接環路）**：拿一條短雙絞線將板載 `Port 5` 與 `Port 6` 對接，或用第二張 PC 網卡接 `Port 2` (RJ45)，一埠當 Talker、另一埠當 Listener。
 
 ---
 
