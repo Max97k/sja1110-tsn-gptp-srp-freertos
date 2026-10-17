@@ -9,7 +9,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NXP SJA1110 · TSN Live Showcase</title>
+<title>SJA1110 · TSN Live Showcase</title>
 <style>
 :root{
   --bg:#05070D; --panel:#0B111D; --panel2:#0F1726; --line:rgba(255,255,255,.07); --line2:rgba(255,255,255,.14);
@@ -35,8 +35,7 @@ button{font-family:inherit}
 /* ── Top bar ── */
 .top{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:22px}
 .brand{display:flex;align-items:center;gap:14px}
-.logo{display:flex;gap:2px;font-weight:900;font-size:22px;letter-spacing:-.5px}
-.logo span:nth-child(1){color:var(--nxp-y)}.logo span:nth-child(2){color:var(--nxp-b)}.logo span:nth-child(3){color:var(--nxp-g)}
+.brand-logo{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;font-weight:900;font-size:13px;letter-spacing:1px;color:#fff;background:linear-gradient(135deg,rgba(63,169,245,.28),rgba(52,211,153,.22));border:1px solid rgba(63,169,245,.45);box-shadow:0 0 16px rgba(63,169,245,.25)}
 .brand .sep{width:1px;height:26px;background:var(--line2)}
 .brand .prod{font-size:13px;color:var(--muted);line-height:1.3}
 .brand .prod b{color:var(--text);font-weight:700;display:block;font-size:14px}
@@ -206,7 +205,7 @@ pre.hex{font:11px/1.55 var(--mono);color:#9FB0C8;white-space:pre}
 <!-- ═══ Top bar ═══ -->
 <header class="top">
   <div class="brand">
-    <div class="logo"><span>N</span><span>X</span><span>P</span></div>
+    <div class="brand-logo">TSN</div>
     <div class="sep"></div>
     <div class="prod"><b>SJA1110 TSN Switch</b><span data-i18n="brandSub">車載 TSN 即時展示台</span></div>
   </div>
@@ -253,7 +252,7 @@ pre.hex{font:11px/1.55 var(--mono);color:#9FB0C8;white-space:pre}
       </g>
       <!-- chip -->
       <rect x="230" y="18" width="436" height="344" rx="18" class="chip-body"/>
-      <text x="448" y="40" text-anchor="middle" class="svg-lbl">NXP SJA1110 · SWITCH FABRIC</text>
+      <text x="448" y="40" text-anchor="middle" class="svg-lbl">SJA1110 · SWITCH FABRIC</text>
       <!-- wires -->
       <path id="pCable" class="wire hot" d="M132 285 L200 285"/>
       <path id="pTrap" class="wire" d="M270 285 C 330 285, 330 205, 388 205"/>
