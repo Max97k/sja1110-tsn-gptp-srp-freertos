@@ -15,9 +15,14 @@ Release/
 *.s19
 
 # ==============================================================================
-# NXP Proprietary RTD Source Code
+# NXP Proprietary RTD / S32CT Auto-Generated Code & Manuals
+# (Automatically populated by S32DS "Update Code" from SJA1110-MGS_gPTP_FreeRTOS.mex)
 # ==============================================================================
 RTD/
+generate/
+board/
+gptp_stack/
+*.pdf
 
 # ==============================================================================
 # Eclipse / S32DS Workspace & User Specific Settings

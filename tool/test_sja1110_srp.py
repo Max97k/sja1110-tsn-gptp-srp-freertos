@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026, Max97k
+# SPDX-License-Identifier: BSD-3-Clause
 """
 SJA1110-MGS-EVM IEEE 802.1Qat (MSRP / MVRP) & 802.1AS (gPTP)
 Bidirectional Test Script

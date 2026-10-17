@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# Copyright (c) 2026, Max97k
+# SPDX-License-Identifier: BSD-3-Clause
 """
 自動掃描本機 S32 Design Studio 安裝路徑並更新 .cproject 中的硬編碼路徑。
 

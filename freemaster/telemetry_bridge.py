@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) 2026, Max97k
+# SPDX-License-Identifier: BSD-3-Clause
 """
 SJA1110 TSN & gPTP FreeRTOS - Hardware Telemetry & Live Wireshark Bridge
 Connects SJA1110 Port 4 (1GbE SFP) <-> PC Ethernet NIC

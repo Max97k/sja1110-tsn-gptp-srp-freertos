@@ -1,3 +1,5 @@
+# Copyright (c) 2026, Max97k
+# SPDX-License-Identifier: BSD-3-Clause
 # Do no remove this
 SHELL := /bin/bash
 # Look for project name in .project. It is always the first entry with name

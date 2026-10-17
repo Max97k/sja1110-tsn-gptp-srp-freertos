@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# Copyright (c) 2026, Max97k
+# SPDX-License-Identifier: BSD-3-Clause
 """
 從編譯後的 SJA1110 ELF 檔案自動解析真實 SRAM 變數符號位址，
 並更新 freemaster/sja1110_freemaster.fmcfg。

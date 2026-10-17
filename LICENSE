@@ -27,3 +27,52 @@ SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
 CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+================================================================================
+THIRD-PARTY SOFTWARE NOTICES AND LICENSES
+================================================================================
+
+1. NXP GenAVB/TSN Stack (srp_stack/)
+--------------------------------------------------------------------------------
+SPDX-License-Identifier: BSD-3-Clause
+Copyright 2014-2016 Freescale Semiconductor, Inc.
+Copyright 2016-2026 NXP
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the conditions of the BSD 3-Clause
+License (reproduced above) are met.
+
+2. FreeRTOS Kernel (FreeRTOS/)
+--------------------------------------------------------------------------------
+SPDX-License-Identifier: MIT
+Copyright (C) 2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+3. NXP S32DS Reference Application & RTD / gPTP Components
+--------------------------------------------------------------------------------
+NXP Real-Time Drivers (RTD/), S32 Configuration Tools auto-generated files
+(generate/, board/), and the NXP SJA1110 gPTP software stack (gptp_stack/) are
+excluded from this repository (.gitignore) and are automatically populated from
+the user's local NXP S32 Design Studio installation when running "Update Code"
+on SJA1110-MGS_gPTP_FreeRTOS.mex.
+
+Any remaining S32DS project template and startup files (src/, include/,
+Project_Settings/, tool/createNvmImage.py, tool/createDBImage.py) are governed
+by the NXP Software License Agreement (LA_OPT_NXP_Software_License) bundled with
+NXP S32 Design Studio and SJA1110 RTD.

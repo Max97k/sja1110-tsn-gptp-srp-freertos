@@ -242,7 +242,7 @@ python tool/sync_freemaster_symbols.py --elf Debug_FLASH/SJA1110_MGS_gPTP_FreeRT
 
 ### 方式 B：透過 S32 Design Studio IDE 建置與除錯
 1. 開啟 **S32 Design Studio**，選擇 **File $\to$ Import $\to$ General $\to$ Existing Projects into Workspace** 匯入本專案。
-2. 若有修改 `.mex` 硬體配置，請切換至 **Peripherals** 視圖並點擊 **Update Code**。
+2. 開啟 **Peripherals** 視圖（`SJA1110-MGS_gPTP_FreeRTOS.mex`）並點擊 **Update Code** — S32DS 將自動從本機已安裝的 NXP RTD/SDK 中載入並產生 `RTD/`、`generate/`、`board/` 與 `gptp_stack/`。
 3. 選擇 **Debug_FLASH**（或 **Debug_RAM**）建置組態，點擊 **Project $\to$ Build Project**。
 4. 將除錯探針連接至評估板 `J16` (10-pin JTAG Cortex Debug 接頭)，開啟對應之 Debug Configuration 並點擊 **Debug** 下載執行。
 
@@ -304,5 +304,8 @@ python tool/sync_freemaster_symbols.py --elf Debug_FLASH/SJA1110_MGS_gPTP_FreeRT
 
 ## 授權條款 (License)
 
-BSD-3-Clause License. Copyright (c) 2026, Max97k. All rights reserved.
-本專案中部分 SRP 與 gPTP 協議棧原始碼衍生自 NXP Semiconductors 以 BSD-3-Clause 授權條款發布之參考軟體。
+* **專案原創程式碼、SJA1110 SRP 硬體卸載移植層、FreeMASTER 遙測與自動化測試工具**（`srp_stack/port/`、`freemaster/`、`tool/test_sja1110_srp.py`、`tool/sync_freemaster_symbols.py`、`tool/fix_s32ds_cproject_paths.py`）：**BSD-3-Clause License**，Copyright (c) 2026, Max97k。
+* **NXP GenAVB/TSN SRP/MRP 核心協議棧**（`srp_stack/`）：**BSD-3-Clause License**，Copyright 2014-2016 Freescale Semiconductor, Inc., Copyright 2016-2026 NXP。
+* **FreeRTOS 即時作業系統核心**（`FreeRTOS/`）：**MIT License**，Copyright (C) 2021 Amazon.com, Inc. or its affiliates。
+* **NXP S32DS 自動產生與範例框架檔案**：NXP Real-Time Drivers（`RTD/`）、S32 Configuration Tools 自動產生之設定檔（`generate/`、`board/`）與 NXP gPTP 協議棧（`gptp_stack/`）均已排除於版本控制之外（`.gitignore`），使用者於 S32DS 內對 `SJA1110-MGS_gPTP_FreeRTOS.mex` 執行 **Update Code** 時即會自動從本機 RTD/SDK 載入產生。其餘 S32DS 專案框架檔案均受 **NXP 軟體授權合約 (`LA_OPT_NXP_Software_License`)** 規範；完整第三方授權聲明請參閱 [LICENSE](LICENSE)。
+

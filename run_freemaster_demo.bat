@@ -1,4 +1,6 @@
 @echo off
+:: Copyright (c) 2026, Max97k
+:: SPDX-License-Identifier: BSD-3-Clause
 title SJA1110 TSN and gPTP FreeRTOS - Live Dashboard Launcher
 echo ===============================================================================
 echo     NXP SJA1110 Automotive TSN Switch + FreeRTOS + IEEE 802.1AS gPTP
