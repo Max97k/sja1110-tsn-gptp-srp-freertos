@@ -1,603 +1,709 @@
 <!DOCTYPE html>
-<!-- Copyright (c) 2026, Max97k | SPDX-License-Identifier: BSD-3-Clause -->
-<html lang="zh-TW">
+<!--
+  Copyright (c) 2026, Max97k
+  SPDX-License-Identifier: BSD-3-Clause
+  Redesigned customer-facing showcase. Backend contract unchanged:
+  WS /ws (init|stats|packet), GET /api/stats, POST /api/{inject_mvrp,inject_talker,inject_listener,reset_demo,selftest}
+-->
+<html lang="zh-Hant">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SJA1110 TSN & gPTP FreeRTOS - 即時監控與 Wireshark 整合儀表板</title>
-  <style>
-    :root {
-      --bg-dark: #0b0f19;
-      --card-bg: #131b2e;
-      --card-border: #1e2c4c;
-      --card-hover: #19233c;
-      --text-main: #f0f4fc;
-      --text-muted: #8899b7;
-      --accent-green: #00e676;
-      --accent-cyan: #00e5ff;
-      --accent-purple: #b388ff;
-      --accent-amber: #ffd700;
-      --accent-red: #ff5252;
-      --ws-gptp: rgba(0, 230, 118, 0.12);
-      --ws-gptp-text: #00e676;
-      --ws-pdelay: rgba(0, 229, 255, 0.12);
-      --ws-pdelay-text: #00e5ff;
-      --ws-msrp: rgba(179, 136, 255, 0.12);
-      --ws-msrp-text: #b388ff;
-      --ws-mvrp: rgba(255, 171, 0, 0.12);
-      --ws-mvrp-text: #ffab00;
-    }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NXP SJA1110 · TSN Live Showcase</title>
+<style>
+:root{
+  --bg:#05070D; --panel:#0B111D; --panel2:#0F1726; --line:rgba(255,255,255,.07); --line2:rgba(255,255,255,.14);
+  --text:#EDF1F7; --muted:#8A97AD; --dim:#4D5A70;
+  --nxp-y:#F9B500; --nxp-b:#3FA9F5; --nxp-g:#A4C639;
+  --sync:#34D399; --fup:#6EE7B7; --pdelay:#38BDF8; --msrp:#B79CFF; --mvrp:#FBBF24; --leak:#F87171;
+  --mono:'JetBrains Mono','Cascadia Code',Consolas,monospace;
+  --sans:'Inter','Segoe UI','Noto Sans TC','Microsoft JhengHei',system-ui,sans-serif;
+  --r:16px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--text);font-family:var(--sans);-webkit-font-smoothing:antialiased}
+body{min-height:100vh;padding:18px clamp(14px,2vw,32px) 40px;
+  background:radial-gradient(1200px 600px at 80% -20%,rgba(63,169,245,.10),transparent 60%),
+             radial-gradient(900px 500px at -10% 10%,rgba(249,181,0,.06),transparent 60%),var(--bg)}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.35;
+  background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);
+  background-size:44px 44px;mask-image:radial-gradient(ellipse at 50% 0%,#000 30%,transparent 75%)}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+button{font-family:inherit}
+.wrap{max-width:1680px;margin:0 auto;position:relative}
 
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-    body { background: var(--bg-dark); color: var(--text-main); height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+/* ── Top bar ── */
+.top{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:22px}
+.brand{display:flex;align-items:center;gap:14px}
+.logo{display:flex;gap:2px;font-weight:900;font-size:22px;letter-spacing:-.5px}
+.logo span:nth-child(1){color:var(--nxp-y)}.logo span:nth-child(2){color:var(--nxp-b)}.logo span:nth-child(3){color:var(--nxp-g)}
+.brand .sep{width:1px;height:26px;background:var(--line2)}
+.brand .prod{font-size:13px;color:var(--muted);line-height:1.3}
+.brand .prod b{color:var(--text);font-weight:700;display:block;font-size:14px}
+.ctrls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.chip{height:32px;display:inline-flex;align-items:center;gap:8px;padding:0 12px;border-radius:99px;font-size:12px;font-weight:600;
+  border:1px solid var(--line2);background:rgba(255,255,255,.03);color:var(--muted);white-space:nowrap}
+.chip .dot{width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 10px currentColor}
+.chip.ok{color:var(--sync);border-color:rgba(52,211,153,.35)}
+.chip.warn{color:var(--nxp-y);border-color:rgba(249,181,0,.35)}
+.chip.off{color:var(--leak);border-color:rgba(248,113,113,.35)}
+.blink{animation:blink 1.6s infinite}@keyframes blink{50%{opacity:.3}}
+.seg{display:inline-flex;height:32px;padding:3px;border-radius:99px;border:1px solid var(--line2);background:rgba(255,255,255,.03)}
+.seg button{border:0;background:none;color:var(--muted);font-size:12px;font-weight:600;padding:0 12px;border-radius:99px;cursor:pointer;transition:.2s}
+.seg button.on{background:var(--text);color:#05070D}
+.ibtn{height:32px;padding:0 12px;border-radius:99px;border:1px solid var(--line2);background:rgba(255,255,255,.03);color:var(--text);font-size:12px;font-weight:600;cursor:pointer;transition:.2s}
+.ibtn:hover{border-color:var(--nxp-b)}
 
-    /* Top Navigation Header */
-    header {
-      background: #0e1526;
-      border-bottom: 1px solid var(--card-border);
-      padding: 10px 20px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-shrink: 0;
-    }
-    .brand { display: flex; align-items: center; gap: 12px; }
-    .brand-logo { width: 34px; height: 34px; background: linear-gradient(135deg, #00e5ff, #0070ba); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 900; color: #fff; font-size: 16px; box-shadow: 0 0 12px rgba(0,229,255,0.4); }
-    .brand-title h1 { font-size: 16px; font-weight: 700; color: #fff; letter-spacing: 0.5px; }
-    .brand-title p { font-size: 11px; color: var(--text-muted); }
+/* ── Hero ── */
+.hero{display:grid;grid-template-columns:minmax(380px,.85fr) 1.15fr;gap:22px;margin-bottom:22px}
+.panel{background:linear-gradient(180deg,rgba(15,23,38,.92),rgba(11,17,29,.92));border:1px solid var(--line);border-radius:var(--r);position:relative}
+.pitch{padding:30px 30px 26px;display:flex;flex-direction:column}
+.eyebrow{font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--nxp-b);margin-bottom:14px}
+.pitch h1{font-size:clamp(26px,2.5vw,38px);line-height:1.15;font-weight:800;letter-spacing:-.5px}
+.pitch h1 em{font-style:normal;background:linear-gradient(90deg,var(--nxp-y),var(--nxp-b) 55%,var(--nxp-g));-webkit-background-clip:text;background-clip:text;color:transparent}
+.pitch p.lead{margin-top:14px;color:var(--muted);font-size:14px;line-height:1.7;max-width:56ch}
+.std{display:flex;flex-wrap:wrap;gap:6px;margin-top:16px}
+.std span{font-family:var(--mono);font-size:11px;padding:4px 9px;border-radius:6px;border:1px solid var(--line2);color:#C9D3E3;cursor:help}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:auto;padding-top:24px}
+.kpi{padding:14px 12px;border-radius:12px;background:rgba(255,255,255,.025);border:1px solid var(--line);cursor:help}
+.kpi .v{font-family:var(--mono);font-size:22px;font-weight:800;letter-spacing:-.5px}
+.kpi .v small{font-size:12px;color:var(--muted);font-weight:600;margin-left:2px}
+.kpi .l{font-size:11px;color:var(--muted);margin-top:4px}
+.kpi svg{display:block;margin-top:6px;width:100%;height:20px}
 
-    .header-pills { display: flex; gap: 8px; align-items: center; }
-    .pill { background: #162038; border: 1px solid var(--card-border); padding: 5px 12px; border-radius: 20px; font-size: 11px; display: flex; align-items: center; gap: 6px; }
-    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-green); box-shadow: 0 0 8px var(--accent-green); }
-    .status-dot.blink { animation: pulse 1s infinite alternate; }
-    @keyframes pulse { from { opacity: 0.4; } to { opacity: 1; } }
+.topo{padding:16px 18px 12px;min-height:420px;display:flex;flex-direction:column}
+.ptitle{display:flex;justify-content:space-between;align-items:center;font-size:11px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.ptitle .tag{font-family:var(--mono);letter-spacing:0;text-transform:none;font-weight:600;color:var(--dim)}
+#topoSvg{width:100%;flex:1;min-height:360px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:6px}
+.legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
 
-    /* Main Grid Layout */
-    .dashboard-container {
-      display: grid;
-      grid-template-columns: 460px 1fr;
-      flex: 1;
-      height: calc(100vh - 55px);
-      overflow: hidden;
-    }
+/* SVG styles */
+.p-box{fill:#0D1524;stroke:rgba(255,255,255,.14);stroke-width:1;transition:all .35s}
+.p-box.up{stroke:var(--sync)}
+.p-box.g1{stroke:var(--nxp-b);fill:rgba(63,169,245,.10)}
+.p-box.talk{stroke:var(--msrp);fill:rgba(183,156,255,.14)}
+.p-box.listen{stroke:var(--sync);fill:rgba(52,211,153,.12)}
+.p-name{fill:var(--text);font:700 11px var(--sans)}
+.p-sub{fill:var(--muted);font:500 9px var(--mono)}
+.p-led{fill:#2A3446;transition:.35s}.p-led.on{fill:var(--sync);filter:drop-shadow(0 0 4px var(--sync))}
+.wire{fill:none;stroke:rgba(255,255,255,.12);stroke-width:2}
+.wire.hot{stroke:rgba(63,169,245,.55)}
+.remap{fill:none;stroke:var(--msrp);stroke-width:2;stroke-dasharray:5 5;opacity:0;transition:opacity .5s;animation:dash 1s linear infinite}
+.remap.show{opacity:.9}
+.stream{fill:none;stroke:var(--sync);stroke-width:3;opacity:0;transition:opacity .5s;stroke-dasharray:2 8;stroke-linecap:round;animation:dash .6s linear infinite}
+.stream.show{opacity:1;filter:drop-shadow(0 0 6px rgba(52,211,153,.7))}
+@keyframes dash{to{stroke-dashoffset:-20}}
+.chip-body{fill:url(#chipGrad);stroke:rgba(255,255,255,.16)}
+.svg-lbl{fill:var(--muted);font:700 10px var(--sans);letter-spacing:1.5px}
+.eng{fill:#0A111E;stroke:rgba(255,255,255,.1);transition:all .4s}
+.eng.on-v{stroke:var(--mvrp);fill:rgba(251,191,36,.10)}
+.eng.on-t{stroke:var(--msrp);fill:rgba(183,156,255,.12)}
+.eng.on-c{stroke:var(--sync);fill:rgba(52,211,153,.12)}
+.eng-t{fill:var(--text);font:700 10px var(--sans)}
+.eng-s{fill:var(--muted);font:500 9px var(--mono)}
 
-    /* Left Panel: FreeMASTER Telemetry */
-    .telemetry-pane {
-      background: #0f1629;
-      border-right: 1px solid var(--card-border);
-      padding: 14px;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
+/* ── Story stepper ── */
+.story{padding:22px 24px;margin-bottom:22px}
+.story-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.story-head h2{font-size:20px;font-weight:800;letter-spacing:-.3px}
+.story-head p{font-size:13px;color:var(--muted);margin-top:4px}
+.story-actions{display:flex;gap:8px}
+.btn{height:40px;padding:0 18px;border-radius:10px;border:1px solid var(--line2);background:rgba(255,255,255,.04);color:var(--text);font-size:13px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:8px;transition:.2s}
+.btn:hover{border-color:var(--nxp-b);transform:translateY(-1px)}
+.btn.primary{background:var(--nxp-y);color:#111;border-color:var(--nxp-y)}
+.btn.primary:hover{filter:brightness(1.08);box-shadow:0 6px 24px rgba(249,181,0,.3)}
+.btn.sm{height:30px;padding:0 11px;font-size:11.5px;border-radius:8px}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;position:relative}
+.progress{position:absolute;left:28px;right:28px;top:27px;height:2px;background:var(--line2);z-index:0}
+.progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--mvrp),var(--msrp),var(--sync));transition:width .6s cubic-bezier(.2,1,.3,1)}
+.step{position:relative;z-index:1;text-align:left;border:1px solid var(--line);background:var(--panel2);border-radius:14px;padding:16px 18px 16px;cursor:pointer;color:var(--text);transition:.25s}
+.step:hover{border-color:var(--line2);transform:translateY(-2px)}
+.step .num{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font:800 11px var(--mono);background:var(--bg);border:2px solid var(--line2);color:var(--muted);margin-bottom:12px;transition:.3s}
+.step h3{font-size:15px;font-weight:700;margin-bottom:6px}
+.step p{font-size:12.5px;color:var(--muted);line-height:1.6}
+.step .res{margin-top:12px;font:600 11px var(--mono);color:var(--dim);display:flex;align-items:center;gap:6px}
+.step.done{border-color:var(--c)}
+.step.done .num{background:var(--c);border-color:var(--c);color:#111}
+.step.done .res{color:var(--c)}
+.step[data-s="1"]{--c:var(--mvrp)}.step[data-s="2"]{--c:var(--msrp)}.step[data-s="3"]{--c:var(--sync)}
 
-    .card {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 10px;
-      padding: 12px 14px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
-    }
-    .card-title {
-      font-size: 12px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      color: var(--text-muted);
-      margin-bottom: 10px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .card-title .badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
-    .badge-pass { background: rgba(0, 230, 118, 0.15); color: var(--accent-green); border: 1px solid rgba(0, 230, 118, 0.3); }
+/* ── Offload row ── */
+.offload{display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:14px;margin-bottom:22px}
+.ocard{padding:18px 20px;cursor:help;transition:border-color .4s}
+.ocard .ot{font-size:11px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted);display:flex;justify-content:space-between}
+.ocard .state{font:700 10px var(--mono);padding:2px 8px;border-radius:99px;border:1px solid var(--line2);color:var(--dim);letter-spacing:0}
+.ocard.on .state{color:var(--c);border-color:var(--c)}
+.ocard.on{border-color:color-mix(in srgb,var(--c) 45%,transparent)}
+.ocard .big{font-family:var(--mono);font-size:26px;font-weight:800;margin-top:14px;letter-spacing:-.5px;color:var(--dim);transition:color .4s}
+.ocard.on .big{color:var(--text)}
+.ocard .desc{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.55}
+.ocard .api{font:500 10.5px var(--mono);color:var(--dim);margin-top:10px}
+#cbsCanvas{width:100%;height:70px;display:block;margin-top:10px}
+.formula{font:500 11px var(--mono);color:var(--muted);margin-top:6px}
 
-    .metric-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .metric-box { background: #0c1222; padding: 8px 10px; border-radius: 6px; border: 1px solid #1a2540; }
-    .metric-label { font-size: 10px; color: var(--text-muted); margin-bottom: 2px; }
-    .metric-value { font-size: 15px; font-weight: 700; color: #fff; }
-    .metric-value.green { color: var(--accent-green); }
-    .metric-value.cyan { color: var(--accent-cyan); }
-    .metric-value.purple { color: var(--accent-purple); }
+/* ── Analyzer ── */
+.analyzer{display:flex;flex-direction:column;overflow:hidden}
+.an-bar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 18px;border-bottom:1px solid var(--line)}
+.an-bar h2{font-size:15px;font-weight:800}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}
+.tab{font-size:11.5px;font-weight:600;padding:5px 10px;border-radius:8px;border:1px solid var(--line);color:var(--muted);cursor:pointer;display:inline-flex;gap:6px;align-items:center;background:none;transition:.15s}
+.tab i{width:7px;height:7px;border-radius:50%}
+.tab b{font:700 10px var(--mono);color:var(--text);opacity:.7}
+.tab.on,.tab:hover{border-color:var(--line2);color:var(--text);background:rgba(255,255,255,.04)}
+.an-body{display:grid;grid-template-columns:1fr 420px;min-height:440px}
+.tbl{overflow:auto;max-height:440px;font:11.5px var(--mono);background:rgba(0,0,0,.25)}
+table{width:100%;border-collapse:collapse;table-layout:fixed}
+thead{position:sticky;top:0;background:#0C1320;z-index:2}
+th{text-align:left;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--dim);padding:9px 10px;border-bottom:1px solid var(--line)}
+td{padding:6px 10px;border-bottom:1px solid rgba(255,255,255,.03);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#B8C3D6}
+tr.row{cursor:pointer;transition:background .15s}
+tr.row:hover{background:rgba(255,255,255,.035)}
+tr.row.sel{background:rgba(63,169,245,.12)}
+tr.row td:first-child{border-left:3px solid var(--rc)}
+tr.row .pr{color:var(--rc);font-weight:700}
+tr.new{animation:flash 1.2s ease-out}@keyframes flash{from{background:rgba(255,255,255,.08)}}
+tr.leak{background:rgba(248,113,113,.12)}
+.dir{font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px}
+.dir.in{background:rgba(52,211,153,.12);color:var(--sync)}.dir.out{background:rgba(63,169,245,.14);color:var(--nxp-b)}
+.insp{border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.insp section{padding:14px 16px;overflow:auto}
+.insp section+section{border-top:1px solid var(--line)}
+.insp h4{font-size:10.5px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.kv{display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-bottom:1px dashed rgba(255,255,255,.05);font:11px var(--mono)}
+.kv span:first-child{color:var(--muted)}.kv span:last-child{color:var(--text);text-align:right;word-break:break-all}
+pre.hex{font:11px/1.55 var(--mono);color:#9FB0C8;white-space:pre}
+.empty{color:var(--dim);font-size:12px;font-style:italic}
 
-    /* Switch 8-Port Grid */
-    .port-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 4px; }
-    .port-node {
-      background: #0b1120;
-      border: 1px solid #1c2742;
-      border-radius: 6px;
-      padding: 6px 4px;
-      text-align: center;
-      transition: all 0.2s;
-    }
-    .port-node.active { border-color: var(--accent-green); background: rgba(0, 230, 118, 0.05); }
-    .port-node.active-1g { border-color: var(--accent-cyan); background: rgba(0, 229, 255, 0.08); box-shadow: 0 0 10px rgba(0,229,255,0.2); }
-    .port-name { font-size: 11px; font-weight: 700; }
-    .port-speed { font-size: 9px; color: var(--text-muted); }
-    .port-led { width: 6px; height: 6px; border-radius: 50%; margin: 3px auto 0; background: #445; }
-    .port-node.active .port-led { background: var(--accent-green); box-shadow: 0 0 6px var(--accent-green); }
-    .port-node.active-1g .port-led { background: var(--accent-cyan); box-shadow: 0 0 6px var(--accent-cyan); }
+/* ── Footer arch ── */
+.arch{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:22px}
+.arch .panel{padding:18px 20px}
+.arch h3{font-size:14px;font-weight:700;margin-bottom:8px;display:flex;gap:10px;align-items:center}
+.arch h3 b{font:800 11px var(--mono);color:var(--nxp-y)}
+.arch p{font-size:12.5px;color:var(--muted);line-height:1.7}
+.arch code{font-family:var(--mono);font-size:11px;color:#C9D3E3;background:rgba(255,255,255,.05);padding:1px 5px;border-radius:4px}
+.foot{margin-top:18px;font-size:11px;color:var(--dim);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
 
-    /* Offload List */
-    .offload-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 6px 0;
-      border-bottom: 1px solid #18233c;
-      font-size: 11px;
-    }
-    .offload-item:last-child { border-bottom: none; }
-    .offload-val { font-family: monospace; font-size: 11px; color: var(--accent-cyan); font-weight: 600; }
+/* ── Tooltip / Toast ── */
+#gl{position:fixed;z-index:999;width:360px;padding:14px 16px;border-radius:12px;background:rgba(9,14,24,.97);border:1px solid var(--line2);
+  box-shadow:0 20px 50px rgba(0,0,0,.6);pointer-events:none;opacity:0;transition:opacity .15s;backdrop-filter:blur(10px)}
+#gl.v{opacity:1}
+#gl .h{display:flex;justify-content:space-between;gap:8px;align-items:flex-start;margin-bottom:8px}
+#gl .t{font-size:13px;font-weight:800}
+#gl .b{font-size:10px;font-weight:700;padding:2px 8px;border-radius:99px;background:var(--nxp-y);color:#111;white-space:nowrap}
+#gl .s{font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin:8px 0 3px}
+#gl .x{font-size:12px;line-height:1.6;color:#D7DEEA}
+#toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);z-index:900;padding:11px 18px;border-radius:12px;background:#F4F6FA;color:#0B111D;font-size:13px;font-weight:600;box-shadow:0 14px 40px rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:.25s}
+#toast.show{opacity:1;transform:translate(-50%,0)}
 
-    /* Interactive Buttons */
-    .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .btn {
-      background: #192542;
-      border: 1px solid var(--card-border);
-      color: #fff;
-      padding: 8px 10px;
-      border-radius: 6px;
-      font-size: 11px;
-      font-weight: 600;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      transition: all 0.2s;
-    }
-    .btn:hover { background: #223258; border-color: var(--accent-cyan); transform: translateY(-1px); }
-    .btn:active { transform: translateY(0); }
-    .btn-primary { background: linear-gradient(135deg, #0070ba, #0099ff); border: none; }
-    .btn-primary:hover { background: linear-gradient(135deg, #0088e0, #1ab0ff); box-shadow: 0 0 10px rgba(0,153,255,0.4); }
-
-    /* Right Panel: Wireshark Packet Analyzer */
-    .packet-pane {
-      background: #090d16;
-      display: flex;
-      flex-direction: column;
-      height: 100%;
-      overflow: hidden;
-    }
-
-    /* Packet Filter / Control Header */
-    .packet-toolbar {
-      background: #111828;
-      border-bottom: 1px solid var(--card-border);
-      padding: 8px 16px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-shrink: 0;
-    }
-    .filter-tabs { display: flex; gap: 6px; align-items: center; }
-    .filter-tab {
-      background: #18233a;
-      border: 1px solid var(--card-border);
-      padding: 4px 10px;
-      border-radius: 4px;
-      font-size: 11px;
-      cursor: pointer;
-      color: var(--text-muted);
-      transition: 0.15s;
-    }
-    .filter-tab.active, .filter-tab:hover { background: #223150; color: #fff; border-color: var(--accent-cyan); }
-    .filter-count { font-weight: 700; margin-left: 4px; padding: 1px 5px; border-radius: 10px; background: #0c1220; font-size: 10px; }
-
-    /* Wireshark Packet Table */
-    .table-container {
-      flex: 1;
-      overflow-y: auto;
-      font-family: "Cascadia Code", Consolas, "Courier New", monospace;
-      font-size: 11px;
-    }
-    table { width: 100%; border-collapse: collapse; text-align: left; }
-    thead { position: sticky; top: 0; background: #131c30; z-index: 2; box-shadow: 0 2px 6px rgba(0,0,0,0.4); }
-    th { padding: 7px 10px; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--card-border); font-size: 11px; }
-    td { padding: 4px 10px; border-bottom: 1px solid rgba(255,255,255,0.03); white-space: nowrap; }
-    tr:hover { filter: brightness(1.25); cursor: pointer; }
-    tr.selected { outline: 1px solid var(--accent-cyan); background: rgba(0, 229, 255, 0.15) !important; }
-
-    /* Packet Row Protocol Color Themes */
-    tr.gptp-sync { background: var(--ws-gptp); color: var(--ws-gptp-text); }
-    tr.gptp-fup { background: var(--ws-gptp); color: #81c784; }
-    tr.gptp-pdelay { background: var(--ws-pdelay); color: var(--ws-pdelay-text); }
-    tr.msrp { background: var(--ws-msrp); color: var(--ws-msrp-text); }
-    tr.mvrp { background: var(--ws-mvrp); color: var(--ws-mvrp-text); }
-    tr.leak { background: rgba(255, 82, 82, 0.2); color: #ff5252; font-weight: bold; }
-
-    /* Bottom Inspector Drawer */
-    .inspector-drawer {
-      height: 220px;
-      background: #0c1220;
-      border-top: 1px solid var(--card-border);
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      flex-shrink: 0;
-    }
-    .inspector-pane {
-      padding: 10px 14px;
-      overflow-y: auto;
-      font-family: "Cascadia Code", Consolas, monospace;
-      font-size: 11px;
-    }
-    .inspector-pane:first-child { border-right: 1px solid var(--card-border); }
-    .inspector-title { font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; }
-    .field-row { display: flex; justify-content: space-between; padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.03); }
-    .field-key { color: var(--text-muted); }
-    .field-val { color: var(--accent-cyan); font-weight: 600; }
-    pre.hex-dump { line-height: 1.4; color: #b0c4de; margin: 0; }
-  </style>
+@media(max-width:1200px){.hero,.an-body{grid-template-columns:1fr}.offload,.arch{grid-template-columns:1fr}.insp{border-left:0;border-top:1px solid var(--line)}}
+@media(max-width:760px){.steps{grid-template-columns:1fr}.progress{display:none}.kpis{grid-template-columns:repeat(2,1fr)}}
+</style>
 </head>
 <body>
+<div class="wrap">
 
-  <!-- Top Navigation Header -->
-  <header>
-    <div class="brand">
-      <div class="brand-logo">TSN</div>
-      <div class="brand-title">
-        <h1>NXP SJA1110 TSN & gPTP FreeRTOS Dashboard</h1>
-        <p>即時車用乙太網交換機遙測與 Wireshark 協定分析整合展示系統</p>
-      </div>
+<!-- ═══ Top bar ═══ -->
+<header class="top">
+  <div class="brand">
+    <div class="logo"><span>N</span><span>X</span><span>P</span></div>
+    <div class="sep"></div>
+    <div class="prod"><b>SJA1110 TSN Switch</b><span data-i18n="brandSub">車載 TSN 即時展示台</span></div>
+  </div>
+  <div class="ctrls">
+    <span class="chip warn" id="connChip"><span class="dot blink"></span><span id="connTxt">連線中…</span></span>
+    <span class="chip" id="srcChip" data-g="probe"><span id="srcTxt">Wire-Derived</span></span>
+    <span class="chip mono" id="uptime">00:00:00</span>
+    <div class="seg"><button id="mWire" class="on" onclick="setSim(false)" data-i18n="modeWire">實機</button><button id="mSim" onclick="setSim(true)" data-i18n="modeSim">模擬</button></div>
+    <button class="ibtn" id="langBtn" onclick="toggleLang()">EN</button>
+    <button class="ibtn" onclick="toggleFs()" title="Fullscreen">⛶</button>
+  </div>
+</header>
+
+<!-- ═══ Hero ═══ -->
+<section class="hero">
+  <div class="panel pitch">
+    <div class="eyebrow" data-i18n="eyebrow">Automotive Time-Sensitive Networking</div>
+    <h1 data-i18n-html="heroTitle">一顆交換晶片，<br><em>時間同步、頻寬預留、硬體整形</em><br>一次到位。</h1>
+    <p class="lead" data-i18n="heroLead">在 SJA1110 內建的 Cortex-M7 上以 FreeRTOS 同時執行 IEEE 802.1AS gPTP 與 802.1Qat SRP；控制平面完成協商後，規則直接寫入交換晶片的 VLAN 表、L2 TCAM 與 CBS 整形器，資料平面全程硬體處理，CPU 零介入。</p>
+    <div class="std">
+      <span data-g="gptp">802.1AS gPTP</span><span data-g="msrp">802.1Qat MSRP</span><span data-g="mvrp">802.1Q MVRP</span><span data-g="cbs">802.1Qav CBS</span><span data-g="heap4">FreeRTOS 11.1</span>
     </div>
-    <div class="header-pills">
-      <div class="pill">
-        <div class="status-dot blink"></div>
-        <span>鏈路：SW1 Port 4 (1Gbps SFP)</span>
-      </div>
-      <div class="pill">
-        <span style="color:var(--accent-green);font-weight:700;">IEEE 802.1AS Pdelay: LOCKED</span>
-      </div>
-      <div class="pill">
-        <span id="uptime-display">運行時間: 00:00:00</span>
-      </div>
+    <div class="kpis">
+      <div class="kpi" data-g="gptp"><div class="v" id="kSync">0</div><div class="l" data-i18n="kSync">gPTP Sync 封包</div></div>
+      <div class="kpi" data-g="pdelay"><div class="v" id="kPdelay">&lt;850<small>ns</small></div><div class="l" data-i18n="kPdelay">Pdelay 鏈路延遲</div></div>
+      <div class="kpi" data-g="trap8b8c"><div class="v" id="kLeak" style="color:var(--sync)">0</div><div class="l" data-i18n="kLeak">0x8B8C 標頭洩漏</div></div>
+      <div class="kpi" data-g="heap4"><div class="v" id="kHeap">13.1<small>KB</small></div><div class="l" data-i18n="kHeap">FreeRTOS 可用 Heap</div><svg id="heapSpark" viewBox="0 0 100 20" preserveAspectRatio="none"><polyline fill="none" stroke="#34D399" stroke-width="1.5" points=""/></svg></div>
     </div>
-  </header>
-
-  <!-- Main Split Dashboard -->
-  <div class="dashboard-container">
-
-    <!-- Left Column: MCU & TSN Switch Telemetry -->
-    <div class="telemetry-pane">
-
-      <!-- gPTP Status Card -->
-      <div class="card">
-        <div class="card-title">
-          <span>IEEE 802.1AS gPTP 時鐘引擎</span>
-          <span class="badge badge-pass">INITIALIZED</span>
-        </div>
-        <div class="metric-grid">
-          <div class="metric-box">
-            <div class="metric-label">Sync 週期</div>
-            <div class="metric-value green">125 ms (8 Hz)</div>
-          </div>
-          <div class="metric-box">
-            <div class="metric-label">Pdelay 延遲</div>
-            <div class="metric-value cyan" id="pdelay-val">N/A (無探針)</div>
-          </div>
-          <div class="metric-box">
-            <div class="metric-label">Master MAC</div>
-            <div class="metric-value" style="font-size:11px;">22:33:44:55:66:77</div>
-          </div>
-          <div class="metric-box">
-            <div class="metric-label">0x8B8C 洩漏檢查</div>
-            <div class="metric-value green" id="leak-val">0 (PASS)</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- FreeRTOS Heap Memory Card -->
-      <div class="card">
-        <div class="card-title">
-          <span>FreeRTOS Heap 記憶體水線 (heap_4)</span>
-          <span class="badge badge-pass">LEAK-FREE</span>
-        </div>
-        <div class="metric-grid">
-          <div class="metric-box">
-            <div class="metric-label">剩餘可用空間</div>
-            <div class="metric-value green" id="heap-free">N/A (無探針)</div>
-          </div>
-          <div class="metric-box">
-            <div class="metric-label">歷史最低水線</div>
-            <div class="metric-value green" id="heap-min">N/A (無探針)</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- SJA1110 8-Port Switch Matrix -->
-      <div class="card">
-        <div class="card-title">
-          <span>SJA1110 8-Port 交換矩陣狀態</span>
-          <span style="font-size:10px;color:var(--text-muted);">雙濾波 Trap 生效</span>
-        </div>
-        <div class="port-grid" id="port-grid">
-          <div class="port-node" id="port-node-0"><div class="port-name">Port 1</div><div class="port-speed" id="port-rate-0">1G SGMII</div><div class="port-led"></div></div>
-          <div class="port-node" id="port-node-1"><div class="port-name">Port 2</div><div class="port-speed" id="port-rate-1">1G RGMII</div><div class="port-led"></div></div>
-          <div class="port-node" id="port-node-2"><div class="port-name">Port 3</div><div class="port-speed" id="port-rate-2">100M SGMII</div><div class="port-led"></div></div>
-          <div class="port-node active-1g" id="port-node-3"><div class="port-name">Port 4</div><div class="port-speed" id="port-rate-3">1G SFP (PC)</div><div class="port-led"></div></div>
-          <div class="port-node" id="port-node-4"><div class="port-name">Port 5</div><div class="port-speed" id="port-rate-4">100BASE-T1</div><div class="port-led"></div></div>
-          <div class="port-node" id="port-node-5"><div class="port-name">Port 6</div><div class="port-speed" id="port-rate-5">100BASE-T1</div><div class="port-led"></div></div>
-          <div class="port-node" id="port-node-6"><div class="port-name">Port 7</div><div class="port-speed" id="port-rate-6">100BASE-T1</div><div class="port-led"></div></div>
-          <div class="port-node" id="port-node-7"><div class="port-name">Port 8</div><div class="port-speed" id="port-rate-7">100M MII</div><div class="port-led"></div></div>
-        </div>
-      </div>
-
-      <!-- Hardware Offload Rules -->
-      <div class="card">
-        <div class="card-title">
-          <span>IEEE 802.1Q TSN 硬體卸載表項</span>
-          <span class="badge badge-pass">ACTIVE</span>
-        </div>
-        <div class="offload-item">
-          <span>MVRP 動態 VLAN 查找表</span>
-          <span class="offload-val" id="offload-vlan">VID = 2 (已寫入)</span>
-        </div>
-        <div class="offload-item">
-          <span>L2 TCAM 串流轉發表 (FDB)</span>
-          <span class="offload-val" id="offload-tcam">91:E0:F0:... -> Port 4</span>
-        </div>
-        <div class="offload-item">
-          <span>IEEE 802.1Qav CBS 整形器</span>
-          <span class="offload-val" id="offload-cbs">16.384 Mbps (Port 4)</span>
-        </div>
-      </div>
-
-      <!-- Interactive Injection Controls -->
-      <div class="card">
-        <div class="card-title">
-          <span>即時互動控制與封包注入</span>
-        </div>
-        <div class="btn-grid">
-          <button class="btn btn-primary" onclick="triggerSelfTest()">🚀 觸發內部自測</button>
-          <button class="btn" onclick="injectMvrp()">📡 注入 MVRP VID=2</button>
-          <button class="btn" onclick="injectTalker()">🎵 注入 MSRP Talker</button>
-          <button class="btn" onclick="injectListener()">🔒 注入 Listener Ready</button>
-        </div>
-      </div>
-
-    </div>
-
-    <!-- Right Column: Live Wireshark Packet Analyzer -->
-    <div class="packet-pane">
-
-      <!-- Toolbar & Protocol Counters -->
-      <div class="packet-toolbar">
-        <div class="filter-tabs">
-          <div class="filter-tab active" onclick="setFilter('all', event)">全部 <span class="filter-count" id="count-all">0</span></div>
-          <div class="filter-tab" onclick="setFilter('gptp-sync', event)">gPTP Sync <span class="filter-count" id="count-sync">0</span></div>
-          <div class="filter-tab" onclick="setFilter('gptp-fup', event)">Follow_Up <span class="filter-count" id="count-fup">0</span></div>
-          <div class="filter-tab" onclick="setFilter('gptp-pdelay', event)">gPTP Pdelay <span class="filter-count" id="count-pdelay">0</span></div>
-          <div class="filter-tab" onclick="setFilter('msrp', event)">MSRP <span class="filter-count" id="count-msrp">0</span></div>
-          <div class="filter-tab" onclick="setFilter('mvrp', event)">MVRP <span class="filter-count" id="count-mvrp">0</span></div>
-        </div>
-        <div style="display:flex;gap:10px;align-items:center;">
-          <label style="font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:4px;">
-            <input type="checkbox" id="autoscroll-chk" checked> 自動滾動
-          </label>
-          <button class="btn" style="padding:4px 8px;font-size:10px;" onclick="clearPackets()">🧹 清空列表</button>
-        </div>
-      </div>
-
-      <!-- Live Packet Table -->
-      <div class="table-container" id="table-scroll">
-        <table id="packet-table">
-          <thead>
-            <tr>
-              <th style="width: 50px;">No.</th>
-              <th style="width: 75px;">Time (s)</th>
-              <th style="width: 140px;">Protocol</th>
-              <th style="width: 130px;">Source MAC</th>
-              <th style="width: 130px;">Destination MAC</th>
-              <th style="width: 55px;">Len</th>
-              <th>Info</th>
-            </tr>
-          </thead>
-          <tbody id="packet-tbody">
-            <!-- Dynamic rows will be inserted here -->
-          </tbody>
-        </table>
-      </div>
-
-      <!-- Bottom Inspector Drawer -->
-      <div class="inspector-drawer">
-        <div class="inspector-pane">
-          <div class="inspector-title">📦 協定欄位解碼 (Protocol Decoded)</div>
-          <div id="inspector-fields">
-            <div style="color:var(--text-muted);font-style:italic;">點擊上方任一封包以檢視詳細欄位解碼</div>
-          </div>
-        </div>
-        <div class="inspector-pane">
-          <div class="inspector-title">📄 封包 Hex Dump 與 ASCII 檢視</div>
-          <pre class="hex-dump" id="inspector-hex">-- 請選取封包 --</pre>
-        </div>
-      </div>
-
-    </div>
-
   </div>
 
-  <script>
-    let packets = [];
-    let activeFilter = 'all';
-    let selectedPacket = null;
-    let ws = null;
+  <div class="panel topo">
+    <div class="ptitle"><span data-i18n="topoTitle">即時拓撲 · 封包流向</span><span class="tag">SJA1110-MGS-EVM · SW1 Port 4 ↔ PC</span></div>
+    <svg id="topoSvg" viewBox="0 0 680 380">
+      <defs>
+        <linearGradient id="chipGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#121C2F"/><stop offset="1" stop-color="#0A101C"/></linearGradient>
+        <radialGradient id="coreGlow"><stop offset="0" stop-color="rgba(249,181,0,.25)"/><stop offset="1" stop-color="rgba(249,181,0,0)"/></radialGradient>
+      </defs>
+      <!-- PC -->
+      <g data-g="remap">
+        <rect x="14" y="250" width="118" height="70" rx="10" class="p-box g1"/>
+        <text x="73" y="278" text-anchor="middle" class="p-name">PC · Wireshark</text>
+        <text x="73" y="294" text-anchor="middle" class="p-sub">Talker / Listener</text>
+        <text x="73" y="308" text-anchor="middle" class="p-sub">telemetry_bridge</text>
+      </g>
+      <!-- chip -->
+      <rect x="230" y="18" width="436" height="344" rx="18" class="chip-body"/>
+      <text x="448" y="40" text-anchor="middle" class="svg-lbl">NXP SJA1110 · SWITCH FABRIC</text>
+      <!-- wires -->
+      <path id="pCable" class="wire hot" d="M132 285 L200 285"/>
+      <path id="pTrap" class="wire" d="M270 285 C 330 285, 330 205, 388 205"/>
+      <path id="pRemap" class="remap" d="M200 285 C 160 250, 160 110, 200 80"/>
+      <path id="pStream" class="stream" d="M270 80 C 330 80, 330 285, 270 285"/>
+      <!-- left ports 1-4 -->
+      <g id="ports"></g>
+      <!-- M7 core -->
+      <g data-g="trap8b8c">
+        <circle cx="448" cy="205" r="80" fill="url(#coreGlow)"/>
+        <rect x="388" y="160" width="120" height="90" rx="12" fill="#0E1626" stroke="rgba(249,181,0,.55)"/>
+        <text x="448" y="185" text-anchor="middle" class="p-name">Cortex-M7</text>
+        <text x="448" y="200" text-anchor="middle" class="p-sub">FreeRTOS · Port 0</text>
+        <text x="448" y="220" text-anchor="middle" class="p-sub" fill="#34D399">gPTPTask 5ms</text>
+        <text x="448" y="234" text-anchor="middle" class="p-sub" fill="#B79CFF">vSRP_Task 10ms</text>
+      </g>
+      <!-- engines -->
+      <g data-g="mvrp"><rect id="eV" x="290" y="300" width="112" height="46" rx="9" class="eng"/><text x="346" y="320" text-anchor="middle" class="eng-t">VLAN Table</text><text id="eVs" x="346" y="335" text-anchor="middle" class="eng-s">4096-VID · idle</text></g>
+      <g data-g="tcam"><rect id="eT" x="410" y="300" width="112" height="46" rx="9" class="eng"/><text x="466" y="320" text-anchor="middle" class="eng-t">L2 TCAM</text><text id="eTs" x="466" y="335" text-anchor="middle" class="eng-s">1024-entry · idle</text></g>
+      <g data-g="cbs"><rect id="eC" x="530" y="300" width="112" height="46" rx="9" class="eng"/><text x="586" y="320" text-anchor="middle" class="eng-t">CBS Shaper</text><text id="eCs" x="586" y="335" text-anchor="middle" class="eng-s">16-ch · idle</text></g>
+      <path class="wire" d="M448 250 L448 300 M346 300 L346 275 L586 275 L586 300"/>
+      <g id="dots"></g>
+    </svg>
+    <div class="legend">
+      <span><i style="background:var(--sync)"></i>gPTP Sync/FUP</span><span><i style="background:var(--pdelay)"></i>Pdelay</span>
+      <span><i style="background:var(--msrp)"></i>MSRP</span><span><i style="background:var(--mvrp)"></i>MVRP</span>
+      <span style="margin-left:auto;color:var(--dim)" data-i18n="legendHint">滑鼠懸停任一元件查看說明</span>
+    </div>
+  </div>
+</section>
 
-    function initWebSocket() {
-      const wsUrl = `ws://${window.location.hostname || '127.0.0.1'}:8091/ws`;
-      ws = new WebSocket(wsUrl);
+<!-- ═══ Story ═══ -->
+<section class="panel story">
+  <div class="story-head">
+    <div><h2 data-i18n="storyTitle">三步完成端到端串流預留</h2><p data-i18n="storySub">一條網路線、一台筆電，即可走完 MVRP → MSRP → 硬體卸載的完整閉迴路</p></div>
+    <div class="story-actions">
+      <button class="btn primary" onclick="runAll()">▶ <span data-i18n="btnAuto">自動播放</span></button>
+      <button class="btn" onclick="resetDemo()">↺ <span data-i18n="btnReset">重置</span></button>
+    </div>
+  </div>
+  <div class="steps">
+    <div class="progress"><i id="prog"></i></div>
+    <button class="step" data-s="1" id="st1" onclick="injectMvrp()">
+      <div class="num">1</div><h3 data-i18n="s1t">加入串流 VLAN</h3>
+      <p data-i18n="s1d">PC 送出 MVRP JoinIn（VID 2），交換器自動把 Port 4 註冊進硬體 VLAN 表，不需人工設定。</p>
+      <div class="res" id="st1r">MVRP · 0x88F5</div>
+    </button>
+    <button class="step" data-s="2" id="st2" onclick="injectTalker()">
+      <div class="num">2</div><h3 data-i18n="s2t">宣告音視訊串流</h3>
+      <p data-i18n="s2d">Talker 宣告 Stream A（128 B @ 8 kHz）。單線模式下韌體自動將其重映射到 Port 1，模擬跨埠拓撲。</p>
+      <div class="res" id="st2r">MSRP Talker Advertise · 0x22EA</div>
+    </button>
+    <button class="step" data-s="3" id="st3" onclick="injectListener()">
+      <div class="num">3</div><h3 data-i18n="s3t">鎖定頻寬、硬體接手</h3>
+      <p data-i18n="s3d">Listener Ready 完成 Port 1 → Port 4 預留，TCAM 只轉發給訂閱埠，CBS 以 10.944 Mbps 硬體整形。</p>
+      <div class="res" id="st3r">MSRP Listener Ready · 0x22EA</div>
+    </button>
+  </div>
+</section>
 
-      ws.onopen = () => {
-        console.log("WebSocket connected to telemetry bridge");
-      };
+<!-- ═══ Offload ═══ -->
+<section class="offload">
+  <div class="panel ocard" id="oV" style="--c:var(--mvrp)" data-g="mvrp">
+    <div class="ot"><span data-i18n="oV">硬體 VLAN 表</span><span class="state" id="oVs">IDLE</span></div>
+    <div class="big" id="oVb">VID —</div>
+    <div class="desc" id="oVd">IDLE (Awaiting MVRP VID=2)</div>
+    <div class="api">Switch_Ip_UpdateVlanLookupEntry()</div>
+  </div>
+  <div class="panel ocard" id="oT" style="--c:var(--msrp)" data-g="tcam">
+    <div class="ot"><span data-i18n="oT">L2 TCAM 群播轉發</span><span class="state" id="oTs">IDLE</span></div>
+    <div class="big" id="oTb">— → —</div>
+    <div class="desc" id="oTd">IDLE (Awaiting MSRP Stream)</div>
+    <div class="api">Switch_Ip_UpdateTcamEntry()</div>
+  </div>
+  <div class="panel ocard" id="oC" style="--c:var(--sync)" data-g="cbs">
+    <div class="ot"><span data-i18n="oC">802.1Qav CBS · Port 4 Class A</span><span class="state" id="oCs">IDLE</span></div>
+    <div class="big" id="oCb">0.000 <small style="font-size:13px;color:var(--muted)">Mbps</small></div>
+    <canvas id="cbsCanvas"></canvas>
+    <div class="formula">idleSlope = (128 + 42) × 8 × 8000 = 10.944 Mbps · ≈1.1% of 1 GbE</div>
+  </div>
+</section>
 
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          if (msg.type === 'packet') {
-            addPacket(msg.data);
-          } else if (msg.type === 'stats') {
-            updateStats(msg.data);
-          } else if (msg.type === 'init') {
-            updateStats(msg.stats);
-            if (msg.history) {
-              msg.history.forEach(addPacket);
-            }
-          }
-        } catch(e) {
-          console.error("WS Parse error", e);
-        }
-      };
+<!-- ═══ Analyzer ═══ -->
+<section class="panel analyzer">
+  <div class="an-bar">
+    <h2 data-i18n="anTitle">即時封包解析</h2>
+    <div class="tabs" id="tabs"></div>
+    <div style="display:flex;gap:6px;align-items:center">
+      <label style="font-size:11.5px;color:var(--muted);display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="autoscroll" checked><span data-i18n="autoscroll">自動捲動</span></label>
+      <button class="btn sm" id="pauseBtn" onclick="togglePause()">⏸</button>
+      <button class="btn sm" onclick="clearPackets()" data-i18n="clear">清除</button>
+    </div>
+  </div>
+  <div class="an-body">
+    <div class="tbl" id="tblScroll">
+      <table><thead><tr>
+        <th style="width:54px">No.</th><th style="width:72px">Time</th><th style="width:78px">Dir</th><th style="width:170px">Protocol</th>
+        <th style="width:132px">Source</th><th style="width:132px">Destination</th><th style="width:48px">Len</th><th>Info</th>
+      </tr></thead><tbody id="tbody"></tbody></table>
+    </div>
+    <div class="insp">
+      <section style="flex:1"><h4 data-i18n="fields">欄位解碼</h4><div id="fields"><div class="empty" data-i18n="pick">點選左側封包查看欄位</div></div></section>
+      <section style="flex:1"><h4>Hex Dump</h4><pre class="hex" id="hex">—</pre></section>
+    </div>
+  </div>
+</section>
 
-      ws.onclose = () => {
-        setTimeout(initWebSocket, 2000);
-      };
-    }
+<!-- ═══ Architecture ═══ -->
+<section class="arch">
+  <div class="panel"><h3><b>01</b><span data-i18n="a1t">雙協定堆疊共存</span></h3><p data-i18n-html="a1b">單顆 Cortex-M7 上同時執行 gPTP（<code>gPTPTask</code> 5 ms）與移植自 NXP GenAVB/TSN 的 SRP（<code>vSRP_Task</code> 10 ms），heap_4 長時間運行零洩漏。</p></div>
+  <div class="panel"><h3><b>02</b><span data-i18n="a2t">硬體攔截與單線重映射</span></h3><p data-i18n-html="a2b"><code>macFilter0/1</code> 將控制訊框攔截至 Host Port 0，外部線路 0x8B8C 零洩漏；<code>SINGLE_CABLE_TALKER_REMAP</code> 讓一條線即可驗證跨埠預留。</p></div>
+  <div class="panel"><h3><b>03</b><span data-i18n="a3t">三大資料面卸載</span></h3><p data-i18n-html="a3b">協商完成後透過 <code>Switch_Ip</code> 寫入 VLAN 表（VID 2）、L2 TCAM（遮罩 0x0010）與 CBS（10.944 Mbps），轉發與整形全由矽晶片完成。</p></div>
+</section>
+<div class="foot"><span>SJA1110-MGS-EVM · RTD 0.9.0 · FreeRTOS 11.1 · T1–T5 Verified</span><span>BSD-3-Clause © 2026 Max97k</span></div>
+</div>
 
-    function addPacket(pkt) {
-      packets.push(pkt);
-      if (packets.length > 500) packets.shift();
+<div id="gl"><div class="h"><div class="t" id="glT"></div><span class="b" id="glB"></span></div><div class="s" id="glPL"></div><div class="x" id="glP"></div><div class="s" id="glEL"></div><div class="x" id="glE"></div></div>
+<div id="toast"></div>
 
-      // Update badge counts
-      document.getElementById('count-all').innerText = packets.length;
-      document.getElementById('count-sync').innerText = packets.filter(p => p.tag === 'gptp-sync').length;
-      document.getElementById('count-fup').innerText = packets.filter(p => p.tag === 'gptp-fup').length;
-      document.getElementById('count-pdelay').innerText = packets.filter(p => p.tag === 'gptp-pdelay').length;
-      document.getElementById('count-msrp').innerText = packets.filter(p => p.tag === 'msrp').length;
-      document.getElementById('count-mvrp').innerText = packets.filter(p => p.tag === 'mvrp').length;
+<script>
+/* ───────────── State ───────────── */
+let packets=[],filter='all',sel=null,paused=false,sim=false,lang='zh',ws=null,wsOk=false;
+let simTimer=null,simSeq=60000,simNo=0,simStart=Date.now(),uptimeBase=0,uptimeAt=Date.now();
+let demo={mvrp:false,talker:false,listener:false},cbsBps=0,heapHist=[];
+const COLORS={'gptp-sync':'#34D399','gptp-fup':'#6EE7B7','gptp-pdelay':'#38BDF8','msrp':'#B79CFF','mvrp':'#FBBF24','leak':'#F87171','other':'#8A97AD'};
+const TABS=[['all','All'],['gptp-sync','Sync'],['gptp-fup','Follow_Up'],['gptp-pdelay','Pdelay'],['msrp','MSRP'],['mvrp','MVRP']];
+const PORTS=[['Port 1','1G SGMII'],['Port 2','1G RGMII'],['Port 3','100M SGMII'],['Port 4','1G SFP'],['Port 5','100BASE-T1'],['Port 6','100BASE-T1'],['Port 7','100BASE-T1'],['Port 8','100M MII']];
 
-      // Filter check
-      if (activeFilter !== 'all' && pkt.tag !== activeFilter) {
-        return;
-      }
+/* ───────────── i18n ───────────── */
+const I={
+zh:{brandSub:'車載 TSN 即時展示台',modeWire:'實機',modeSim:'模擬',eyebrow:'Automotive Time-Sensitive Networking',
+heroTitle:'一顆交換晶片，<br><em>時間同步、頻寬預留、硬體整形</em><br>一次到位。',
+heroLead:'在 SJA1110 內建的 Cortex-M7 上以 FreeRTOS 同時執行 IEEE 802.1AS gPTP 與 802.1Qat SRP；控制平面完成協商後，規則直接寫入交換晶片的 VLAN 表、L2 TCAM 與 CBS 整形器，資料平面全程硬體處理，CPU 零介入。',
+kSync:'gPTP Sync 封包',kPdelay:'Pdelay 鏈路延遲',kLeak:'0x8B8C 標頭洩漏',kHeap:'FreeRTOS 可用 Heap',topoTitle:'即時拓撲 · 封包流向',legendHint:'滑鼠懸停任一元件查看說明',
+storyTitle:'三步完成端到端串流預留',storySub:'一條網路線、一台筆電，即可走完 MVRP → MSRP → 硬體卸載的完整閉迴路',btnAuto:'自動播放',btnReset:'重置',
+s1t:'加入串流 VLAN',s1d:'PC 送出 MVRP JoinIn（VID 2），交換器自動把 Port 4 註冊進硬體 VLAN 表，不需人工設定。',
+s2t:'宣告音視訊串流',s2d:'Talker 宣告 Stream A（128 B @ 8 kHz）。單線模式下韌體自動將其重映射到 Port 1，模擬跨埠拓撲。',
+s3t:'鎖定頻寬、硬體接手',s3d:'Listener Ready 完成 Port 1 → Port 4 預留，TCAM 只轉發給訂閱埠，CBS 以 10.944 Mbps 硬體整形。',
+oV:'硬體 VLAN 表',oT:'L2 TCAM 群播轉發',oC:'802.1Qav CBS · Port 4 Class A',anTitle:'即時封包解析',autoscroll:'自動捲動',clear:'清除',fields:'欄位解碼',pick:'點選左側封包查看欄位',
+a1t:'雙協定堆疊共存',a1b:'單顆 Cortex-M7 上同時執行 gPTP（<code>gPTPTask</code> 5 ms）與移植自 NXP GenAVB/TSN 的 SRP（<code>vSRP_Task</code> 10 ms），heap_4 長時間運行零洩漏。',
+a2t:'硬體攔截與單線重映射',a2b:'<code>macFilter0/1</code> 將控制訊框攔截至 Host Port 0，外部線路 0x8B8C 零洩漏；<code>SINGLE_CABLE_TALKER_REMAP</code> 讓一條線即可驗證跨埠預留。',
+a3t:'三大資料面卸載',a3b:'協商完成後透過 <code>Switch_Ip</code> 寫入 VLAN 表（VID 2）、L2 TCAM（遮罩 0x0010）與 CBS（10.944 Mbps），轉發與整形全由矽晶片完成。',
+plain:'原理',effect:'車載效益',conn:'實機已連線',connWait:'等待 Bridge…',simOn:'模擬模式',wait:'等待中',done:'已生效',
+glossary:{
+trap8b8c:['0x8B8C 管理標頭與硬體攔截','L2 控制平面','SJA1110 以 macFilter0/1 攔截 gPTP、MSRP、MVRP 訊框，加上帶有入埠編號的 0x8B8C 標頭送給內部 Cortex-M7；對外發送時再由硬體剝除。','MCU 精確知道每個控制封包的進出埠，外部線路上維持 100% 標準 IEEE 格式。'],
+gptp:['IEEE 802.1AS gPTP 時間同步','亞微秒同步','每 125 ms 發送 Sync 與 Follow_Up，攜帶 MAC 層硬體擷取的奈秒級時間戳記。','全車鏡頭、雷達、音訊與域控制器共用同一時間基準。'],
+pdelay:['Pdelay 鏈路延遲量測','線材校正','以 Pdelay_Req / Resp / Resp_Follow_Up 四個時間戳記計算單段線路傳播延遲。','補償不同線束長度造成的延遲，並作為埠是否具備 TSN 能力的判斷依據。'],
+mvrp:['IEEE 802.1Q MVRP 動態 VLAN','自動開通','終端宣告加入 VID 2 後，交換器自動把該埠寫入 4096-VID 硬體查找表。','省去全車靜態 VLAN 配置，接上設備即可開通串流通道。'],
+msrp:['IEEE 802.1Qat MSRP 串流預留','頻寬保證','Talker 宣告串流規格，Listener 回覆 Ready 後，沿途網橋逐跳預留頻寬。','關鍵感測與音視訊串流不受 OTA、娛樂等突發流量干擾。'],
+cbs:['IEEE 802.1Qav 信用整形器','硬體整形','預留成功後以 idleSlope = 10.944 Mbps 寫入 SJA1110 的 16 通道硬體整形器。','高優先串流由晶片平滑送出，避免佇列爆量，CPU 零負擔。'],
+tcam:['1024-Entry L2 TCAM','群播剪枝','將串流 MAC 91:E0:F0:00:FE:00 與目的埠遮罩 0x0010（Port 4）寫入硬體 TCAM。','串流只送到有訂閱的埠，不會灌進其他 100BASE-T1 感測器鏈路。'],
+remap:['單線 Talker 重映射','一條線閉迴路','802.1Q 不允許同一埠自發自收配對；韌體把 Port 4 收到的 Talker 視為來自 Port 1，完成 Port 1 → Port 4 預留。','現場展示只需一條網路線連接筆電與 Port 4。'],
+heap4:['FreeRTOS heap_4','零碎片','48 KB Heap 搭配相鄰空閒區塊合併，支撐 8 埠 SRP 狀態機與 64 組計時器。','反覆註冊/註銷後記憶體水線維持平穩，無洩漏。'],
+probe:['遙測來源','FreeMASTER','若偵錯器與 FreeMASTER Lite 已連線，數值直接讀自 MCU SRAM；否則由線上封包推導。','讓客戶分辨「晶片內部真值」與「線路觀測值」。']}},
+en:{brandSub:'Automotive TSN Live Showcase',modeWire:'Live',modeSim:'Simulate',eyebrow:'Automotive Time-Sensitive Networking',
+heroTitle:'One switch chip.<br><em>Time sync, stream reservation, hardware shaping</em><br>— all in silicon.',
+heroLead:'The SJA1110\'s integrated Cortex-M7 runs IEEE 802.1AS gPTP and 802.1Qat SRP concurrently on FreeRTOS. Once the control plane converges, rules are written straight into the switch VLAN table, L2 TCAM and CBS shapers — the data plane runs entirely in hardware with zero CPU involvement.',
+kSync:'gPTP Sync frames',kPdelay:'Pdelay link delay',kLeak:'0x8B8C header leaks',kHeap:'FreeRTOS free heap',topoTitle:'Live topology · packet flow',legendHint:'Hover any element for details',
+storyTitle:'End-to-end stream reservation in 3 steps',storySub:'One cable, one laptop — the full MVRP → MSRP → hardware offload loop',btnAuto:'Auto-play',btnReset:'Reset',
+s1t:'Join the stream VLAN',s1d:'The PC sends MVRP JoinIn (VID 2); the switch registers Port 4 in its hardware VLAN table automatically.',
+s2t:'Advertise the A/V stream',s2d:'Talker advertises Stream A (128 B @ 8 kHz). In single-cable mode firmware remaps it to Port 1 to emulate a cross-port topology.',
+s3t:'Lock bandwidth, hand off to HW',s3d:'Listener Ready completes the Port 1 → Port 4 reservation; TCAM forwards only to subscribers and CBS shapes at 10.944 Mbps.',
+oV:'Hardware VLAN table',oT:'L2 TCAM multicast FDB',oC:'802.1Qav CBS · Port 4 Class A',anTitle:'Live packet analyzer',autoscroll:'Auto-scroll',clear:'Clear',fields:'Decoded fields',pick:'Select a packet to inspect',
+a1t:'Dual-stack coexistence',a1b:'gPTP (<code>gPTPTask</code> 5 ms) and SRP ported from NXP GenAVB/TSN (<code>vSRP_Task</code> 10 ms) share one Cortex-M7, with a leak-free heap_4 over long runs.',
+a2t:'HW trap & single-cable remap',a2b:'<code>macFilter0/1</code> trap control frames to Host Port 0 with zero 0x8B8C leakage; <code>SINGLE_CABLE_TALKER_REMAP</code> validates cross-port reservation on one cable.',
+a3t:'Three data-plane offloads',a3b:'After convergence, <code>Switch_Ip</code> programs the VLAN table (VID 2), L2 TCAM (mask 0x0010) and CBS (10.944 Mbps) — forwarding and shaping happen in silicon.',
+plain:'How it works',effect:'Automotive value',conn:'Hardware connected',connWait:'Waiting for bridge…',simOn:'Simulation',wait:'pending',done:'active',
+glossary:{
+trap8b8c:['0x8B8C header & hardware trap','L2 control plane','macFilter0/1 trap gPTP, MSRP and MVRP frames to the Cortex-M7 with a 0x8B8C header carrying the ingress port; hardware strips it on egress.','Per-port visibility for the MCU while external links stay 100% standard IEEE.'],
+gptp:['IEEE 802.1AS gPTP','Sub-µs sync','Sync and Follow_Up every 125 ms carry nanosecond timestamps captured at the MAC.','Cameras, radars, audio and zone controllers share one timebase.'],
+pdelay:['Peer delay measurement','Cable calibration','Four timestamps from Pdelay_Req / Resp / Resp_Follow_Up yield the link propagation delay.','Compensates harness length and gates asCapable.'],
+mvrp:['IEEE 802.1Q MVRP','Dynamic VLAN','A JoinIn for VID 2 makes the switch add the port to its 4096-VID hardware table.','No static VLAN provisioning — plug in and the path opens.'],
+msrp:['IEEE 802.1Qat MSRP','Guaranteed bandwidth','Talker Advertise + Listener Ready reserve bandwidth hop-by-hop.','Critical streams are protected from OTA or infotainment bursts.'],
+cbs:['IEEE 802.1Qav CBS','HW shaping','idleSlope = 10.944 Mbps is programmed into one of 16 hardware shapers.','Bursts are paced in silicon with zero CPU load.'],
+tcam:['1024-entry L2 TCAM','Multicast pruning','Stream DA 91:E0:F0:00:FE:00 with dest mask 0x0010 (Port 4) is written to TCAM.','Streams reach subscribers only — no flooding onto sensor links.'],
+remap:['Single-cable Talker remap','One-cable loop','802.1Q forbids pairing on the same port; firmware treats the Port 4 Talker as Port 1 to complete Port 1 → Port 4.','A full demo needs only one cable to Port 4.'],
+heap4:['FreeRTOS heap_4','No fragmentation','48 KB heap with free-block coalescing for 8-port SRP and 64 timers.','Flat watermark across repeated register/deregister cycles.'],
+probe:['Telemetry source','FreeMASTER','With a debug probe and FreeMASTER Lite, values come from MCU SRAM; otherwise they are derived from the wire.','Distinguishes on-chip truth from wire observation.']}}};
+const T=()=>I[lang];
+const tx=(zh,en)=>lang==='zh'?zh:en;
 
-      renderPacketRow(pkt);
-    }
+function applyLang(l){
+  lang=l;document.documentElement.lang=l==='zh'?'zh-Hant':'en';
+  document.querySelectorAll('[data-i18n]').forEach(e=>{const k=e.dataset.i18n;if(T()[k]!==undefined)e.textContent=T()[k]});
+  document.querySelectorAll('[data-i18n-html]').forEach(e=>{const k=e.dataset.i18nHtml;if(T()[k]!==undefined)e.innerHTML=T()[k]});
+  document.getElementById('langBtn').textContent=l==='zh'?'EN':'中文';
+  renderDemo();setConn();
+}
+function toggleLang(){applyLang(lang==='zh'?'en':'zh')}
+function toggleFs(){document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen().catch(()=>{})}
 
-    function renderPacketRow(pkt) {
-      const tbody = document.getElementById('packet-tbody');
-      const tr = document.createElement('tr');
-      tr.className = pkt.tag;
-      tr.id = `pkt-${pkt.no}`;
-      tr.onclick = () => selectPacket(pkt);
+/* ───────────── Topology build ───────────── */
+const portPos=[];
+(function buildPorts(){
+  const g=document.getElementById('ports');let h='';
+  // left column Ports 1..4 (x 200..270), right column 5..8 (x 590..660) — inside chip
+  [62,130,198,266].forEach((y,i)=>portPos[i]={x:200,y});
+  [62,130,198,266].forEach((y,i)=>portPos[i+4]={x:590,y});
+  // nudge right column above engines
+  portPos[4].y=62;portPos[5].y=112;portPos[6].y=162;portPos[7].y=212;
+  PORTS.forEach((p,i)=>{
+    const {x,y}=portPos[i];const w=i<4?70:70,hh=i<4?40:40;
+    h+=`<g data-g="${i===3?'remap':i>=4?'tcam':'msrp'}"><rect id="pb${i}" x="${x}" y="${y}" width="${w}" height="${hh}" rx="8" class="p-box"/>
+    <circle id="pl${i}" cx="${x+w-9}" cy="${y+9}" r="3" class="p-led"/>
+    <text x="${x+8}" y="${y+17}" class="p-name">${p[0]}</text><text id="pr${i}" x="${x+8}" y="${y+31}" class="p-sub">${p[1]}</text></g>`;
+  });
+  g.innerHTML=h;
+  // adjust stream path to port centers
+  document.getElementById('pStream').setAttribute('d','M270 82 C 340 82, 340 286, 270 286');
+  document.getElementById('pRemap').setAttribute('d','M200 286 C 150 250, 150 120, 200 82');
+  document.getElementById('pCable').setAttribute('d','M132 286 L200 286');
+  document.getElementById('pTrap').setAttribute('d','M270 286 C 330 286, 330 205, 388 205');
+})();
+function setPorts(links){
+  links.forEach((up,i)=>{
+    const b=document.getElementById('pb'+i);if(!b)return;
+    let c='p-box';if(up)c+=i===3?' g1':' up';
+    if(i===0&&demo.talker)c='p-box talk';
+    if(i===3&&demo.listener)c='p-box listen';
+    b.setAttribute('class',c);
+    document.getElementById('pl'+i).setAttribute('class','p-led'+(up?' on':''));
+  });
+}
+let portLinks=[false,false,false,true,false,false,false,false];
 
-      tr.innerHTML = `
-        <td>${pkt.no}</td>
-        <td>${pkt.time}</td>
-        <td><strong>${pkt.protocol}</strong></td>
-        <td>${pkt.src}</td>
-        <td>${pkt.dst}</td>
-        <td>${pkt.len}</td>
-        <td>${pkt.info}</td>
-      `;
+/* animated packet dots */
+const dotsG=document.getElementById('dots');let liveDots=0;
+function flyDot(tag,outbound){
+  if(liveDots>14||document.hidden)return;
+  const segs=outbound?[['pCable',0],['pTrap',0]]:[['pTrap',1],['pCable',1]];
+  const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+  c.setAttribute('r',4.5);c.setAttribute('fill',COLORS[tag]||'#fff');c.style.filter=`drop-shadow(0 0 5px ${COLORS[tag]||'#fff'})`;
+  dotsG.appendChild(c);liveDots++;
+  const paths=segs.map(([id,r])=>({p:document.getElementById(id),r,L:document.getElementById(id).getTotalLength()}));
+  const total=paths.reduce((a,b)=>a+b.L,0),dur=900,t0=performance.now();
+  (function step(now){
+    let d=Math.min(1,(now-t0)/dur)*total;
+    for(const s of paths){if(d<=s.L){const pt=s.p.getPointAtLength(s.r?s.L-d:d);c.setAttribute('cx',pt.x);c.setAttribute('cy',pt.y);break}d-=s.L}
+    if(now-t0<dur)requestAnimationFrame(step);else{c.remove();liveDots--}
+  })(t0);
+}
 
-      tbody.appendChild(tr);
+/* ───────────── Packets ───────────── */
+const esc=s=>String(s??'').replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+function buildTabs(){
+  document.getElementById('tabs').innerHTML=TABS.map(([k,n])=>`<button class="tab ${k===filter?'on':''}" onclick="setFilter('${k}')">${k!=='all'?`<i style="background:${COLORS[k]}"></i>`:''}${n}<b id="c-${k}">0</b></button>`).join('');
+  updateCounts();
+}
+function updateCounts(){
+  TABS.forEach(([k])=>{const e=document.getElementById('c-'+k);if(e)e.textContent=k==='all'?packets.length:packets.filter(p=>p.tag===k).length});
+  document.getElementById('kSync').textContent=packets.filter(p=>p.tag==='gptp-sync').length.toLocaleString();
+}
+function addPacket(p){
+  if(paused)return;
+  packets.push(p);if(packets.length>500)packets.shift();
+  updateCounts();flyDot(p.tag,p.is_outbound);
+  if(filter==='all'||p.tag===filter)rowFor(p,true);
+  if(!sel&&packets.length===1)pick(p);
+}
+function rowFor(p,isNew){
+  const tb=document.getElementById('tbody');const tr=document.createElement('tr');
+  tr.className='row'+(isNew?' new':'')+(p.tag==='leak'?' leak':'');tr.id='r'+p.no;tr.style.setProperty('--rc',COLORS[p.tag]||'#8A97AD');
+  tr.onclick=()=>pick(p);
+  tr.innerHTML=`<td>${esc(p.no)}</td><td>${esc(p.time)}</td><td>${p.is_outbound?'<span class="dir out">PC →</span>':'<span class="dir in">← SJA</span>'}</td><td class="pr">${esc(p.protocol)}</td><td>${esc(p.src)}</td><td>${esc(p.dst)}</td><td>${esc(p.len)}</td><td title="${esc(p.info)}">${esc(p.info)}</td>`;
+  tb.appendChild(tr);
+  while(tb.children.length>500)tb.firstChild.remove();
+  if(document.getElementById('autoscroll').checked){const s=document.getElementById('tblScroll');s.scrollTop=s.scrollHeight}
+}
+function pick(p){
+  sel=p;document.querySelectorAll('tr.row.sel').forEach(r=>r.classList.remove('sel'));
+  const r=document.getElementById('r'+p.no);if(r)r.classList.add('sel');
+  const f=p.fields&&Object.keys(p.fields).length?p.fields:{Summary:p.info};
+  document.getElementById('fields').innerHTML=Object.entries(f).map(([k,v])=>`<div class="kv"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join('');
+  document.getElementById('hex').textContent=p.hex_dump||'—';
+}
+function setFilter(k){filter=k;buildTabs();const tb=document.getElementById('tbody');tb.innerHTML='';packets.filter(p=>k==='all'||p.tag===k).forEach(p=>rowFor(p,false))}
+function togglePause(){paused=!paused;document.getElementById('pauseBtn').textContent=paused?'▶':'⏸'}
+function clearPackets(){packets=[];sel=null;document.getElementById('tbody').innerHTML='';updateCounts();document.getElementById('fields').innerHTML=`<div class="empty">${T().pick}</div>`;document.getElementById('hex').textContent='—'}
 
-      if (document.getElementById('autoscroll-chk').checked) {
-        const scrollDiv = document.getElementById('table-scroll');
-        scrollDiv.scrollTop = scrollDiv.scrollHeight;
-      }
-    }
+/* ───────────── Demo state rendering ───────────── */
+let vlanStr='IDLE (Awaiting MVRP VID=2)',tcamStr='IDLE (Awaiting MSRP Stream)';
+function renderDemo(){
+  const n=(demo.mvrp?1:0)+(demo.talker?1:0)+(demo.listener?1:0);
+  document.getElementById('prog').style.width=(n/3*100)+'%';
+  [['st1',demo.mvrp,'MVRP · 0x88F5','VID 2 → HW VLAN'],['st2',demo.talker,'MSRP Talker Advertise · 0x22EA','Stream A @ Port 1 (remap)'],['st3',demo.listener&&demo.talker,'MSRP Listener Ready · 0x22EA','TCAM 0x0010 · CBS 10.944 Mbps']]
+   .forEach(([id,on,idle,okTxt])=>{document.getElementById(id).classList.toggle('done',!!on);document.getElementById(id+'r').textContent=on?'✓ '+okTxt:idle});
+  // VLAN
+  const oV=document.getElementById('oV');oV.classList.toggle('on',demo.mvrp);
+  document.getElementById('oVs').textContent=demo.mvrp?'ACTIVE':'IDLE';
+  document.getElementById('oVb').textContent=demo.mvrp?'VID 2':'VID —';
+  document.getElementById('oVd').textContent=vlanStr;
+  // TCAM
+  const locked=demo.talker&&demo.listener;
+  const oT=document.getElementById('oT');oT.classList.toggle('on',demo.talker);
+  document.getElementById('oTs').textContent=locked?'PROGRAMMED':demo.talker?'TALKER':'IDLE';
+  document.getElementById('oTb').textContent=locked?'P1 → P4':demo.talker?'P1 → ?':'— → —';
+  document.getElementById('oTd').textContent=tcamStr;
+  // CBS
+  const oC=document.getElementById('oC');oC.classList.toggle('on',cbsBps>0);
+  document.getElementById('oCs').textContent=cbsBps>0?'SHAPING':'IDLE';
+  document.getElementById('oCb').innerHTML=`${(cbsBps/1e6).toFixed(3)} <small style="font-size:13px;color:var(--muted)">Mbps</small>`;
+  // SVG
+  document.getElementById('pRemap').classList.toggle('show',demo.talker);
+  document.getElementById('pStream').classList.toggle('show',locked);
+  document.getElementById('pTrap').setAttribute('class','wire hot');
+  const eng=(id,on,cls,txt,idle)=>{document.getElementById(id).setAttribute('class','eng'+(on?' '+cls:''));document.getElementById(id+'s').textContent=on?txt:idle};
+  eng('eV',demo.mvrp,'on-v','VID 2 · Port 4','4096-VID · idle');
+  eng('eT',demo.talker,'on-t',locked?'mask 0x0010':'talker seen','1024-entry · idle');
+  eng('eC',cbsBps>0,'on-c','10.944 Mbps','16-ch · idle');
+  setPorts(portLinks);
+}
+function setDemo(m,t,l,bps,v,tc){demo={mvrp:!!m,talker:!!t,listener:!!l};cbsBps=bps||0;if(v)vlanStr=v;if(tc)tcamStr=tc;renderDemo()}
 
-    function selectPacket(pkt) {
-      document.querySelectorAll('#packet-tbody tr').forEach(r => r.classList.remove('selected'));
-      const row = document.getElementById(`pkt-${pkt.no}`);
-      if (row) row.classList.add('selected');
+/* ───────────── Stats from bridge ───────────── */
+function fmtUp(s){return [Math.floor(s/3600),Math.floor(s%3600/60),s%60].map(x=>String(x).padStart(2,'0')).join(':')}
+function updateStats(s){
+  if(!s||sim)return;
+  if(s.uptime_sec!==undefined){uptimeBase=s.uptime_sec;uptimeAt=Date.now()}
+  const leak=s.leak_8b8c||0,kl=document.getElementById('kLeak');kl.textContent=leak;kl.style.color=leak?'var(--leak)':'var(--sync)';
+  if(s.pdelay_ns!=null)document.getElementById('kPdelay').innerHTML=`${esc(s.pdelay_ns)}<small>ns</small>`;
+  if(s.free_heap_bytes!=null)pushHeap(s.free_heap_bytes);
+  document.getElementById('srcTxt').textContent=s.probe_connected?'MCU Probe · FreeMASTER':'Wire-Derived';
+  document.getElementById('srcChip').className='chip '+(s.probe_connected?'ok':'');
+  if(Array.isArray(s.port_rates))s.port_rates.forEach((r,i)=>{const e=document.getElementById('pr'+i);if(e)e.textContent=r});
+  if(Array.isArray(s.port_links))portLinks=s.port_links.slice();
+  const m=s.mvrp_active||(s.vlan_offload||'').includes('ACTIVE');
+  const t=s.talker_active||/TALKER|Port 4/.test(s.tcam_offload||'');
+  const l=s.listener_active||(s.cbs_slope_bps>0);
+  setDemo(m,t,l,s.cbs_slope_bps,s.vlan_offload,s.tcam_offload);
+}
+function pushHeap(b){
+  heapHist.push(b);if(heapHist.length>40)heapHist.shift();
+  document.getElementById('kHeap').innerHTML=`${(b/1000).toFixed(1)}<small>KB</small>`;
+  const mn=Math.min(...heapHist)-200,mx=Math.max(...heapHist)+200;
+  const pts=heapHist.map((v,i)=>`${(i/(Math.max(heapHist.length-1,1)))*100},${18-((v-mn)/(mx-mn))*16}`).join(' ');
+  document.querySelector('#heapSpark polyline').setAttribute('points',pts);
+}
+setInterval(()=>{
+  const s=sim?Math.floor((Date.now()-simStart)/1000):uptimeBase+Math.floor((Date.now()-uptimeAt)/1000);
+  document.getElementById('uptime').textContent=fmtUp(s);
+},1000);
 
-      const fieldsContainer = document.getElementById('inspector-fields');
-      let fieldsHtml = '';
-      if (pkt.fields && Object.keys(pkt.fields).length > 0) {
-        for (const [k, v] of Object.entries(pkt.fields)) {
-          fieldsHtml += `<div class="field-row"><span class="field-key">${k}</span><span class="field-val">${v}</span></div>`;
-        }
-      } else {
-        fieldsHtml = `<div>${pkt.info}</div>`;
-      }
-      fieldsContainer.innerHTML = fieldsHtml;
+/* ───────────── Connection ───────────── */
+function setConn(){
+  const c=document.getElementById('connChip'),t=document.getElementById('connTxt');
+  if(sim){c.className='chip warn';t.textContent=T().simOn;return}
+  c.className='chip '+(wsOk?'ok':'off');t.textContent=wsOk?T().conn:T().connWait;
+}
+function initWS(){
+  try{ws=new WebSocket(`ws://${location.hostname||'127.0.0.1'}:8091/ws`)}catch(e){setTimeout(initWS,2000);return}
+  ws.onopen=()=>{wsOk=true;setConn()};
+  ws.onclose=()=>{wsOk=false;setConn();setTimeout(initWS,2000)};
+  ws.onmessage=ev=>{if(sim)return;try{const m=JSON.parse(ev.data);
+    if(m.type==='packet')addPacket(m.data);else if(m.type==='stats')updateStats(m.data);
+    else if(m.type==='init'){updateStats(m.stats);(m.history||[]).forEach(addPacket)}}catch(e){console.error(e)}};
+}
 
-      document.getElementById('inspector-hex').innerText = pkt.hex_dump || '-- 無 Hex 資料 --';
-    }
+/* ───────────── Simulation ───────────── */
+const PC='a0:ad:9f:2d:fe:84',SJ='22:33:44:55:66:77';
+function sp(protocol,tag,src,dst,len,info,out,fields){
+  simNo++;addPacket({no:simNo,time:((Date.now()-simStart)/1000).toFixed(3),protocol,tag,src,dst,len,info,is_outbound:out,fields,
+    hex_dump:`0000  01 80 c2 00 00 0e 22 33 44 55 66 77 88 f7 10 02  |......"3DUfw....|\n0010  00 2c 00 00 02 08 00 00 00 00 00 00 00 00 00 00  |.,..............|`});
+}
+function simTick(){
+  simSeq++;const sec=Math.floor((Date.now()-simStart)/1000);
+  sp('Sync','gptp-sync',SJ,'01:80:c2:00:00:0e',60,`SequenceID=${simSeq}, LogInterval=-3 (125ms)`,false,{MessageType:'Sync',VersionPTP:2,DomainNumber:0,Flags:'0x0208',SequenceID:simSeq,LogMessageInterval:-3});
+  setTimeout(()=>sp('Follow_Up','gptp-fup',SJ,'01:80:c2:00:00:0e',90,`SequenceID=${simSeq}, PreciseOriginTimestamp=${145000+sec}s+412890000ns`,false,{MessageType:'Follow_Up',SequenceID:simSeq,Timestamp:`${145000+sec}.412890000 s`}),60);
+  if(simSeq%8===0){const q=simSeq/8;
+    sp('Pdelay_Req','gptp-pdelay',SJ,'01:80:c2:00:00:0e',68,`SequenceID=${q}, RequestingPort=Port 4`,false,{MessageType:'Pdelay_Req',SequenceID:q});
+    setTimeout(()=>sp('Pdelay_Resp','gptp-pdelay',PC,'01:80:c2:00:00:0e',70,`SequenceID=${q}, ReceiptTimestamp=${145000+sec}s`,true,{MessageType:'Pdelay_Resp',SequenceID:q}),120);}
+  if(simSeq%4===0)pushHeap(13064);
+}
+function setSim(on){
+  sim=on;document.getElementById('mWire').classList.toggle('on',!on);document.getElementById('mSim').classList.toggle('on',on);
+  clearInterval(simTimer);setConn();
+  if(on){simStart=Date.now();simTimer=setInterval(simTick,250);document.getElementById('srcTxt').textContent='Simulated';toast(tx('已切換至模擬模式，可離線展示完整流程','Simulation mode — full flow available offline'))}
+  else{fetch('/api/stats').then(r=>r.json()).then(updateStats).catch(()=>{});toast(tx('已切換至實機模式','Live hardware mode'))}
+}
 
-    function setFilter(filter, evt) {
-      activeFilter = filter;
-      document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
-      if (evt && evt.currentTarget) {
-        evt.currentTarget.classList.add('active');
-      }
+/* ───────────── Actions ───────────── */
+function api(path,msg){return fetch(path,{method:'POST'}).then(r=>r.json()).then(()=>{toast(msg);return fetch('/api/stats')}).then(r=>r.json()).then(updateStats).catch(e=>{console.error(e);toast(tx('⚠ 無法連線至 Bridge，可切換至模擬模式','⚠ Bridge unreachable — try Simulate mode'))})}
+function injectMvrp(){
+  if(sim){sp('MVRP','mvrp',PC,'01:80:c2:00:00:21',60,'VID=2, Event=JoinIn (0x24), NumValues=1, LeaveAll=0',true,{AttributeType:'VID (1)',FirstValue_VID:2,ThreePackedEvent:'JoinIn (0x24)'});
+    setTimeout(()=>sp('MVRP','mvrp','22:33:44:55:66:75','01:80:c2:00:00:21',60,'VID=2, Event=In, Registrar=IN',false,{AttributeType:'VID (1)',FirstValue_VID:2,ThreePackedEvent:'In'}),150);
+    setDemo(true,demo.talker,demo.listener,cbsBps,'VID = 2 ACTIVE (JoinIn)');toast(tx('① VID 2 已寫入 SJA1110 硬體 VLAN 表','① VID 2 programmed into hardware VLAN table'));return}
+  api('/api/inject_mvrp',tx('① 已注入 MVRP JoinIn (VID 2)','① MVRP JoinIn (VID 2) injected'));
+}
+function injectTalker(){
+  if(sim){sp('MSRP Domain','msrp',PC,'01:80:c2:00:00:0e',60,'AttributeType=4 (Domain), SRclassID=6 (Class A), Priority=3, VID=2',true,{AttributeType:'Domain (4)',SRclassID:6,Priority:3,SRclassVID:2});
+    setTimeout(()=>sp('MSRP Talker Advertise','msrp',PC,'01:80:c2:00:00:0e',64,'StreamID=00:11:22:33:44:55:00:01, DA=91:E0:F0:00:FE:00 (128B @ 8kHz)',true,{AttributeType:'Talker Advertise (1)',StreamID:'00:11:22:33:44:55:00:01',DestMAC:'91:E0:F0:00:FE:00',MaxFrameSize:128,MaxIntervalFrames:1,RemappedPort:'Port 1 (logical_port=2)'}),120);
+    setDemo(demo.mvrp,true,demo.listener,cbsBps,null,demo.listener?'91:E0:F0:00:FE:00 -> Port 4 (0x0010)':'TALKER ADV (91:E0:F0:00:FE:00 @ Port 1)');
+    toast(tx('② Talker 已宣告，並重映射至 Port 1','② Talker advertised and remapped to Port 1'));return}
+  api('/api/inject_talker',tx('② 已注入 MSRP Domain + Talker Advertise','② MSRP Domain + Talker Advertise injected'));
+}
+function injectListener(){
+  if(sim){sp('MSRP Listener Ready','msrp',PC,'01:80:c2:00:00:0e',60,'StreamID=00:11:22:33:44:55:00:01, Declaration=Ready',true,{AttributeType:'Listener Ready (3)',StreamID:'00:11:22:33:44:55:00:01',FourPackedEvent:'Ready',HardwareOffload:'TCAM 0x0010 + CBS 10.944 Mbps'});
+    const ok=demo.talker;setDemo(demo.mvrp,demo.talker,true,ok?10944000:0,null,ok?'91:E0:F0:00:FE:00 -> Port 4 (0x0010)':null);
+    toast(ok?tx('③ 串流已鎖定：TCAM 0x0010 + CBS 10.944 Mbps','③ Stream locked: TCAM 0x0010 + CBS 10.944 Mbps'):tx('需先完成步驟 ② Talker','Run step ② Talker first'));return}
+  api('/api/inject_listener',tx('③ 已注入 MSRP Listener Ready','③ MSRP Listener Ready injected'));
+}
+function runAll(){
+  if(sim){resetDemo(true);setTimeout(injectMvrp,400);setTimeout(injectTalker,1500);setTimeout(injectListener,2700);return}
+  api('/api/selftest',tx('已完成完整閉迴路注入（MVRP + Talker + Listener）','Full closed-loop injection complete'));
+}
+function resetDemo(quiet){
+  if(sim){setDemo(false,false,false,0,'IDLE (Awaiting MVRP VID=2)','IDLE (Awaiting MSRP Stream)');if(!quiet)toast(tx('已重置，可依序點擊 ① ② ③','Reset — click ① ② ③ in order'));return}
+  api('/api/reset_demo',tx('已重置展示狀態','Demo state reset'));
+}
 
-      const tbody = document.getElementById('packet-tbody');
-      tbody.innerHTML = '';
-      packets.forEach(pkt => {
-        if (filter === 'all' || pkt.tag === filter) {
-          renderPacketRow(pkt);
-        }
-      });
-    }
+/* ───────────── CBS credit animation ───────────── */
+const cv=document.getElementById('cbsCanvas'),cx=cv.getContext('2d');let ph=0;
+function drawCbs(){
+  const w=cv.clientWidth,h=cv.clientHeight,d=devicePixelRatio||1;
+  if(cv.width!==w*d){cv.width=w*d;cv.height=h*d}
+  cx.setTransform(d,0,0,d,0,0);cx.clearRect(0,0,w,h);
+  const mid=h/2;cx.strokeStyle='rgba(255,255,255,.08)';cx.setLineDash([3,4]);cx.beginPath();cx.moveTo(0,mid);cx.lineTo(w,mid);cx.stroke();cx.setLineDash([]);
+  cx.fillStyle='rgba(138,151,173,.6)';cx.font='9px '+getComputedStyle(document.body).getPropertyValue('--mono');cx.fillText('credit 0',4,mid-4);
+  const on=cbsBps>0;cx.lineWidth=2;cx.strokeStyle=on?'#34D399':'rgba(255,255,255,.18)';cx.beginPath();
+  const period=60;
+  for(let x=0;x<=w;x++){
+    let y=mid;
+    if(on){const p=((x+ph)%period)/period;y=p<.75?mid+12-p/.75*24:mid-12+(p-.75)/.25*24}
+    x?cx.lineTo(x,y):cx.moveTo(x,y);
+  }
+  cx.stroke();
+  if(on){cx.fillStyle='rgba(52,211,153,.9)';for(let x=-(ph%period)+period*.75;x<w;x+=period)cx.fillRect(x,h-8,period*.25,4)}
+  ph+=on?.8:0;requestAnimationFrame(drawCbs);
+}
 
-    function clearPackets() {
-      packets = [];
-      document.getElementById('packet-tbody').innerHTML = '';
-      document.getElementById('count-all').innerText = '0';
-      document.getElementById('count-sync').innerText = '0';
-      document.getElementById('count-fup').innerText = '0';
-      document.getElementById('count-pdelay').innerText = '0';
-      document.getElementById('count-msrp').innerText = '0';
-      document.getElementById('count-mvrp').innerText = '0';
-    }
+/* ───────────── Glossary tooltip ───────────── */
+const gl=document.getElementById('gl');let gTarget=null;
+document.addEventListener('mouseover',e=>{
+  const tg=e.target.closest('[data-g]');if(!tg||tg===gTarget)return;
+  const g=T().glossary[tg.dataset.g];if(!g)return;gTarget=tg;
+  ['glT','glB','glP','glE'].forEach((id,i)=>document.getElementById(id).textContent=g[[0,1,2,3][i]]);
+  document.getElementById('glPL').textContent=T().plain;document.getElementById('glEL').textContent=T().effect;
+  gl.classList.add('v');posGl(e);
+});
+document.addEventListener('mousemove',e=>{if(gTarget)posGl(e)});
+document.addEventListener('mouseout',e=>{if(gTarget&&!gTarget.contains(e.relatedTarget)){gl.classList.remove('v');gTarget=null}});
+function posGl(e){const w=gl.offsetWidth,h=gl.offsetHeight;let x=e.clientX+18,y=e.clientY+18;if(x+w>innerWidth-12)x=e.clientX-w-18;if(y+h>innerHeight-12)y=e.clientY-h-18;gl.style.left=x+'px';gl.style.top=Math.max(12,y)+'px'}
 
-    function updateStats(s) {
-      if (!s) return;
-      if (s.uptime_sec !== undefined) {
-        const hrs = Math.floor(s.uptime_sec / 3600).toString().padStart(2, '0');
-        const mins = Math.floor((s.uptime_sec % 3600) / 60).toString().padStart(2, '0');
-        const secs = (s.uptime_sec % 60).toString().padStart(2, '0');
-        document.getElementById('uptime-display').innerText = `運行時間: ${hrs}:${mins}:${secs}`;
-      }
-      if (s.leak_8b8c !== undefined) {
-        const el = document.getElementById('leak-val');
-        el.innerText = `${s.leak_8b8c} (${s.leak_8b8c === 0 ? 'PASS' : 'LEAK!'})`;
-        el.className = s.leak_8b8c === 0 ? 'metric-value green' : 'metric-value red';
-      }
-      document.getElementById('pdelay-val').innerText = (s.pdelay_ns !== null && s.pdelay_ns !== undefined) ? `${s.pdelay_ns} ns` : 'N/A (無探針)';
-      document.getElementById('heap-free').innerText = (s.free_heap_bytes !== null && s.free_heap_bytes !== undefined) ? `${s.free_heap_bytes.toLocaleString()} B` : 'N/A (無探針)';
-      document.getElementById('heap-min').innerText = (s.min_free_heap_bytes !== null && s.min_free_heap_bytes !== undefined) ? `${s.min_free_heap_bytes.toLocaleString()} B` : 'N/A (無探針)';
-      if (s.vlan_offload) document.getElementById('offload-vlan').innerText = s.vlan_offload;
-      if (s.tcam_offload) document.getElementById('offload-tcam').innerText = s.tcam_offload;
-      document.getElementById('offload-cbs').innerText = (s.cbs_slope_bps !== null && s.cbs_slope_bps !== undefined) ? `${(s.cbs_slope_bps / 1e6).toFixed(3)} Mbps (Port 4)` : 'N/A (無探針)';
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('show'),2600)}
 
-      if (Array.isArray(s.port_links)) {
-        s.port_links.forEach((up, idx) => {
-          const node = document.getElementById(`port-node-${idx}`);
-          if (node) {
-            const is1g = (idx === 0 || idx === 1 || idx === 3);
-            node.className = up ? (is1g ? 'port-node active-1g' : 'port-node active') : 'port-node';
-          }
-        });
-      }
-      if (Array.isArray(s.port_rates)) {
-        s.port_rates.forEach((rate, idx) => {
-          const rEl = document.getElementById(`port-rate-${idx}`);
-          if (rEl) rEl.innerText = rate;
-        });
-      }
-    }
+/* keyboard shortcuts for presenters: 1/2/3 steps, A auto, R reset, S sim, L lang */
+document.addEventListener('keydown',e=>{if(e.target.tagName==='INPUT')return;
+  ({'1':injectMvrp,'2':injectTalker,'3':injectListener,'a':runAll,'r':()=>resetDemo(),'s':()=>setSim(!sim),'l':toggleLang,'f':toggleFs}[e.key.toLowerCase()]||(()=>{}))()});
 
-    // API Trigger helpers
-    function triggerSelfTest() {
-      fetch('/api/selftest', { method: 'POST' }).catch(err => console.error(err));
-    }
-    function injectMvrp() {
-      fetch('/api/inject_mvrp', { method: 'POST' }).catch(err => console.error(err));
-    }
-    function injectTalker() {
-      fetch('/api/inject_talker', { method: 'POST' }).catch(err => console.error(err));
-    }
-    function injectListener() {
-      fetch('/api/inject_listener', { method: 'POST' }).catch(err => console.error(err));
-    }
-
-    window.onload = initWebSocket;
-  </script>
+window.onload=()=>{buildTabs();applyLang('zh');renderDemo();drawCbs();initWS();
+  if(location.protocol==='file:')setSim(true);};
+</script>
 </body>
 </html>

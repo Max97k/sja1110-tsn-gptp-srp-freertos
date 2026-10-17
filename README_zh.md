@@ -274,20 +274,35 @@ python tool/sync_freemaster_symbols.py --elf Debug_FLASH/SJA1110_MGS_gPTP_FreeRT
 
 ## FreeMASTER 與 Wireshark 即時整合 Demo 儀表板
 
-本專案提供一套車規級視覺化展示環境，將 **MCU 內部 FreeMASTER 遙測** 與 **外部實體網路線 Wireshark 抓包串流** 整合於同一現代化 Web 儀表板中：
+本專案提供一套車規級、面向客戶展示的互動式 TSN 儀表板，將 **MCU 內部 FreeMASTER 遙測** 與 **外部實體網路線 Wireshark 抓包串流** 整合於現代化 Web 畫面中：
 
 * **一鍵啟動**：在專案根目錄下直接執行 `run_freemaster_demo.bat`，系統會自動在後台啟動 Python 遙測橋接伺服器並自動開啟瀏覽器展示畫面：
   ```cmd
   run_freemaster_demo.bat
   ```
-* **展示網址**：`http://127.0.0.1:8091/index.html`（WebSocket 即時串流：`ws://127.0.0.1:8091/ws`）
-* **核心 Demo 模組**：
-  1. **IEEE 802.1AS gPTP 引擎監控**：即時顯示 125ms Sync 速率、<150ns Pdelay 鎖定狀態與零 0x8B8C 洩漏指示。
-  2. **FreeRTOS Heap 動態水線**：19,576 Bytes 剩餘空間動態折線圖，證明長時間運作零記憶體洩漏。
-  3. **SJA1110 8-Port 交換矩陣燈號**：視覺化 8 個實體連接埠的 Link 狀態與協商速率（Port 4 1Gbps 藍燈、Port 1~3 100M 綠燈）。
-  4. **TSN 硬體卸載卡片**：即時展示 VLAN 表項、L2 TCAM 串流轉發表與 CBS 信用整形器。
-  5. **Wireshark 即時封包串流面板**：即時滾動彩色封包列表（綠色 gPTP、藍色 Pdelay、紫色 MSRP、橘色 MVRP），點選任一封包可立即展開協定樹欄位解碼與 Hex Dump。
-  6. **互動注入控制按鈕**：一鍵於網頁端發送「觸發內部自測」、「注入 MVRP VID=2」或「注入 MSRP 串流」，同屏即時觀察封包飛過與硬體表項聯動生效。
+* **展示網址**：`http://127.0.0.1:8091/index.html`（WebSocket 即時串流：`ws://127.0.0.1:8091/ws`，FreeMASTER Lite：`http://127.0.0.1:8090/`）
+* **核心 Demo 模組與能力**：
+  1. **互動式 SVG 交換矩陣拓撲與動態封包流向**：
+     * 視覺化 SJA1110 交換晶片內部架構，包含 Port 1~8 鏈路狀態與協商速率、Cortex-M7 雙任務核心（`gPTPTask` 5ms、`vSRP_Task` 10ms）以及 3 大硬體卸載引擎（VLAN 表、L2 TCAM、CBS 整形器）。
+     * 封包飛點（FlyDot）即時沿著網路線與內部 `0x8B8C` 攔截/重映射路徑動態飛行。
+  2. **三步完成端到端串流預留（Story Stepper）**：
+     * **步驟 1 — 加入串流 VLAN**：注入 MVRP JoinIn (VID=2)，交換器自動把 Port 4 註冊進硬體 VLAN 查找表，不需人工靜態配置。
+     * **步驟 2 — 宣告音視訊串流**：Talker 宣告 Stream A（128 B @ 8 kHz）；單線展示模式下韌體自動將其重映射至 Port 1，模擬跨埠預留拓撲。
+     * **步驟 3 — 鎖定頻寬、硬體接手**：Listener Ready 完成 Port 1 → Port 4 預留，晶片自動寫入 L2 TCAM 目的埠遮罩 `0x0010` 並啟動 CBS 硬體整形（`10.944 Mbps`）。
+     * **一鍵自動播放 (`▶`) 與重置 (`↺`)**：支援一鍵全自動閉迴路注入示範，以及隨時一鍵清空復原展示狀態。
+  3. **三大資料面硬體卸載卡片與即時 CBS 信用波形 Canvas**：
+     * 即時聯動監控 `Switch_Ip_UpdateVlanLookupEntry()`、`Switch_Ip_UpdateTcamEntry()` 與 `Switch_Ip_SetCbsIdleSlope()`。
+     * HTML5 Canvas 動態繪製 IEEE 802.1Qav 信用值累積、突發送出與斜率回補波形（`idleSlope = (128 + 42) × 8 × 8000 = 10.944 Mbps`）。
+  4. **Wireshark 即時封包解析與欄位檢查器**：
+     * 彩色標籤封包列表（Sync、Follow_Up、Pdelay、MSRP、MVRP、0x8B8C 洩漏），支援協定分類篩選分頁、流向標籤、自動滾動與暫停監聽。
+     * 支援點選任一封包即時展開層級化 Key-Value 欄位解碼與 Hex Dump 完整檢視。
+  5. **實機與模擬雙模式（Live Hardware & Simulation）**：
+     * **實機模式 (`實機`)**：連線至 `telemetry_bridge.py`，接收實體線路與 MCU SRAM 遙測。
+     * **模擬模式 (`模擬`)**：內建 100% 獨立離線展示引擎，無需連接硬體板子或網路線，即可流暢向客戶離線演繹完整 TSN 流程。
+  6. **名詞懸停卡片、雙語介面與簡報者快捷鍵**：
+     * 滑鼠懸停於拓撲或硬體元件即可彈出專業原理與車載效益說明。
+     * 支援 **繁體中文** 與 **English** 一鍵切換。
+     * 簡報專用快捷鍵：`1`/`2`/`3`（執行步驟）、`A`（自動播放）、`R`（重置）、`S`（切換模擬/實機）、`L`（切換語系）、`F`（切換全螢幕）。
 
 ---
 

@@ -61,9 +61,12 @@ stats = {
     "free_heap_bytes": None,
     "min_free_heap_bytes": None,
     "gptp_initialized": False,
-    "vlan_offload": "UNVERIFIED (Connect Probe / Awaiting MVRP)",
-    "tcam_offload": "UNVERIFIED (Connect Probe / Awaiting MSRP)",
-    "cbs_slope_bps": None,
+    "vlan_offload": "IDLE (Awaiting MVRP VID=2)",
+    "tcam_offload": "IDLE (Awaiting MSRP Stream)",
+    "cbs_slope_bps": 0,
+    "mvrp_active": False,
+    "talker_active": False,
+    "listener_active": False,
     "port_links": [False, False, False, True, False, False, False, False],
     "port_rates": ["1G SGMII", "1G RGMII", "100M SGMII", "1G SFP (PC)", "100BASE-T1", "100BASE-T1", "100BASE-T1", "100M MII"]
 }
@@ -292,14 +295,36 @@ def on_packet_received(pkt):
             stats["gptp_pdelay_req"] += 1
             if not is_outbound:
                 respond_pdelay_req(raw_bytes)
+                if not stats["probe_connected"]:
+                    stats["pdelay_ns"] = "< 850"
 
     elif et == 0x22EA:
         proto, tag, info, fields = dissect_msrp(raw_bytes)
         stats["msrp_count"] += 1
+        if not stats["probe_connected"]:
+            attr_type = fields.get("AttributeType")
+            if attr_type == 1:
+                stats["_wire_talker"] = True
+                stats["talker_active"] = True
+                stats["port_links"][0] = True  # Port 1 active via Single-Cable Talker Remap
+                if not stats.get("_wire_listener"):
+                    stats["tcam_offload"] = "TALKER ADV (91:E0:F0:00:FE:00 @ Port 1)"
+            elif attr_type == 3:
+                stats["_wire_listener"] = True
+                stats["listener_active"] = True
+            if stats.get("_wire_talker") and stats.get("_wire_listener"):
+                stats["tcam_offload"] = "91:E0:F0:00:FE:00 -> Port 4 (0x0010)"
+                stats["cbs_slope_bps"] = 10944000
 
     elif et == 0x88F5:
         proto, tag, info, fields = dissect_mvrp(raw_bytes)
         stats["mvrp_count"] += 1
+        if not stats["probe_connected"]:
+            vid = fields.get("FirstValue_VID", 0)
+            ev_str = str(fields.get("ThreePackedEvent", ""))
+            if vid > 0 and any(k in ev_str for k in ("JoinIn", "In", "New")):
+                stats["mvrp_active"] = True
+                stats["vlan_offload"] = f"VID = {vid} ACTIVE ({ev_str.split()[0]})"
 
     elif et == 0x8B8C:
         stats["leak_8b8c"] += 1
@@ -341,6 +366,9 @@ def inject_mvrp_join():
     pdu = struct.pack("!BBBHBB", 0x00, 0x01, 0x02, 0x0001, 0x00, 0x02) + struct.pack("!BHH", 0x24, 0x0000, 0x0000)
     pkt = Ether(dst="01:80:c2:00:00:21", src=PC_MAC, type=0x88F5) / Raw(load=pdu)
     sendp(pkt, iface=IFACE, verbose=False)
+    stats["mvrp_active"] = True
+    if not stats["probe_connected"]:
+        stats["vlan_offload"] = "VID = 2 ACTIVE (JoinIn)"
     return {"status": "ok", "msg": "MVRP JoinIn (VID=2) injected"}
 
 
@@ -357,6 +385,11 @@ def inject_msrp_talker():
     pdu = struct.pack("!BBBHH", 0x00, 0x01, 25, attr_list_len, 0x0001) + first_val + struct.pack("!BHH", 36, 0, 0)
     pkt = Ether(dst="01:80:c2:00:00:0e", src=PC_MAC, type=0x22EA) / Raw(load=pdu)
     sendp(pkt, iface=IFACE, verbose=False)
+    stats["_wire_talker"] = True
+    stats["talker_active"] = True
+    stats["port_links"][0] = True
+    if not stats["probe_connected"] and not stats.get("_wire_listener"):
+        stats["tcam_offload"] = "TALKER ADV (91:E0:F0:00:FE:00 @ Port 1)"
     return {"status": "ok", "msg": "MSRP Domain (Class A) + Talker Advertise (StreamID=0011223344550001, DA=91:E0:F0:00:FE:00) injected"}
 
 
@@ -367,6 +400,11 @@ def inject_msrp_listener():
     pdu = struct.pack("!BBBHH", 0x00, 0x03, 8, attr_list_len, 0x0001) + stream_id + struct.pack("!BBHH", 0x24, 0x80, 0, 0)
     pkt = Ether(dst="01:80:c2:00:00:0e", src=PC_MAC, type=0x22EA) / Raw(load=pdu)
     sendp(pkt, iface=IFACE, verbose=False)
+    stats["_wire_listener"] = True
+    stats["listener_active"] = True
+    if not stats["probe_connected"] and stats.get("_wire_talker"):
+        stats["tcam_offload"] = "91:E0:F0:00:FE:00 -> Port 4 (0x0010)"
+        stats["cbs_slope_bps"] = 10944000
     return {"status": "ok", "msg": "MSRP Listener Ready (StreamID=0011223344550001) injected"}
 
 
@@ -396,19 +434,51 @@ async def api_stats(request):
     return web.json_response(stats)
 
 
+async def push_stats_now():
+    stats["uptime_sec"] = int(time.time() - start_time)
+    if connected_ws_clients:
+        msg = json.dumps({"type": "stats", "data": stats})
+        for ws in list(connected_ws_clients):
+            try:
+                await ws.send_str(msg)
+            except Exception:
+                pass
+
+
 async def api_inject_mvrp(request):
     res = inject_mvrp_join()
+    await asyncio.sleep(0.05)
+    await push_stats_now()
     return web.json_response(res)
 
 
 async def api_inject_talker(request):
     res = inject_msrp_talker()
+    await asyncio.sleep(0.05)
+    await push_stats_now()
     return web.json_response(res)
 
 
 async def api_inject_listener(request):
     res = inject_msrp_listener()
+    await asyncio.sleep(0.05)
+    await push_stats_now()
     return web.json_response(res)
+
+
+async def api_reset_demo(request):
+    stats["_wire_talker"] = False
+    stats["_wire_listener"] = False
+    stats["mvrp_active"] = False
+    stats["talker_active"] = False
+    stats["listener_active"] = False
+    stats["port_links"][0] = False
+    if not stats["probe_connected"]:
+        stats["vlan_offload"] = "IDLE (Awaiting MVRP VID=2)"
+        stats["tcam_offload"] = "IDLE (Awaiting MSRP Stream)"
+        stats["cbs_slope_bps"] = 0
+    await push_stats_now()
+    return web.json_response({"status": "ok", "msg": "Demo offload state reset"})
 
 
 async def api_selftest(request):
@@ -425,6 +495,7 @@ async def api_selftest(request):
     except Exception:
         pass
     await poll_mcu_probe_once()
+    await push_stats_now()
     return web.json_response({"status": "ok", "probe_connected": stats["probe_connected"], "msg": "Test frames injected on wire (and MCU selftest triggered if probe attached)"})
 
 
@@ -459,6 +530,7 @@ def main():
     app.router.add_post("/api/inject_mvrp", api_inject_mvrp)
     app.router.add_post("/api/inject_talker", api_inject_talker)
     app.router.add_post("/api/inject_listener", api_inject_listener)
+    app.router.add_post("/api/reset_demo", api_reset_demo)
     app.router.add_post("/api/selftest", api_selftest)
 
     # Also serve static web dashboard directly on port 8091

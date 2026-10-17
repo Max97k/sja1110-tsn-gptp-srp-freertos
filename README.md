@@ -274,20 +274,35 @@ python tool/sync_freemaster_symbols.py --elf Debug_FLASH/SJA1110_MGS_gPTP_FreeRT
 
 ## FreeMASTER & Live Wireshark Interactive Demo Dashboard
 
-This repository includes an automotive-grade real-time web dashboard that unifies **MCU-internal FreeMASTER telemetry** and **external Ethernet Wireshark packet streaming** on a single screen:
+This repository features an automotive-grade, customer-facing interactive showcase dashboard that unifies **MCU-internal FreeMASTER telemetry** and **external Ethernet Wireshark packet streaming** into a single modern web experience:
 
-* **One-Click Launch**: Run `run_freemaster_demo.bat` in the repository root. The launcher starts the Python telemetry bridge in the background and opens the browser:
+* **One-Click Launch**: Run `run_freemaster_demo.bat` in the repository root. The launcher starts the Python telemetry bridge in the background and automatically opens the dashboard in your default browser:
   ```cmd
   run_freemaster_demo.bat
   ```
-* **Dashboard URL**: `http://127.0.0.1:8091/index.html` (WebSocket Stream: `ws://127.0.0.1:8091/ws`)
-* **Key Demo Modules**:
-  1. **IEEE 802.1AS gPTP Engine Monitor**: Real-time 125ms Sync rate, <150ns Pdelay lock status, and zero `0x8B8C` leakage indicator.
-  2. **FreeRTOS Heap Watermark**: Live sparkline chart showing 19,576 Bytes remaining with zero memory leaks.
-  3. **SJA1110 8-Port Switch Matrix**: Visual port LED indicators and negotiated speeds (Port 4 1Gbps, Ports 1~3 100M).
-  4. **TSN Hardware Offload Cards**: Real-time hardware status for VLAN table, L2 TCAM multicast FDB, and CBS credit shaper.
-  5. **Wireshark Live Packet Analyzer**: Color-coded scrolling table (green gPTP, cyan Pdelay, purple MSRP, orange MVRP) with clickable protocol tree decoding and Hex Dump.
-  6. **Interactive Injection Controls**: One-click web buttons for "Trigger Self-Test", "Inject MVRP JoinIn (VID=2)", and "Inject MSRP Stream Reservation".
+* **Dashboard URL**: `http://127.0.0.1:8091/index.html` (WebSocket Stream: `ws://127.0.0.1:8091/ws`, FreeMASTER Lite: `http://127.0.0.1:8090/`)
+* **Key Showcase Modules & Capabilities**:
+  1. **Interactive SVG Switch Topology & Animated Packet Flow**:
+     * Visual SJA1110 switch fabric showing Port 1~8 link status, speeds, internal Cortex-M7 dual-task core (`gPTPTask` 5ms, `vSRP_Task` 10ms), and 3 hardware offload engines (VLAN Table, L2 TCAM, CBS Shaper).
+     * Animated live packet dots (FlyDot) dynamically traveling along cables and internal `0x8B8C` trap/remap paths in real time.
+  2. **3-Step End-to-End Stream Reservation Story Stepper**:
+     * **Step 1 — Join Stream VLAN**: Injects MVRP JoinIn (VID=2); switch automatically registers Port 4 into the hardware VLAN lookup table without manual configuration.
+     * **Step 2 — Advertise AV Stream**: Talker advertises Stream A (128 B @ 8 kHz); in single-cable mode, firmware automatically remaps it to Port 1 to emulate cross-port topology.
+     * **Step 3 — Lock Bandwidth & Hardware Offload**: Listener Ready completes Port 1 → Port 4 reservation, programming L2 TCAM destination mask `0x0010` and CBS idleSlope `10.944 Mbps`.
+     * **One-Click Auto-Play (`▶`) & Reset (`↺`)**: Automated full closed-loop sequence injection and instant state reset.
+  3. **Live Hardware Offload Status & CBS Credit Canvas**:
+     * Real-time offload cards tracking `Switch_Ip_UpdateVlanLookupEntry()`, `Switch_Ip_UpdateTcamEntry()`, and `Switch_Ip_SetCbsIdleSlope()`.
+     * HTML5 Canvas rendering real-time IEEE 802.1Qav credit accumulation, transmission slope, and credit recovery waves (`(128 + 42) × 8 × 8000 = 10.944 Mbps`).
+  4. **Wireshark Live Packet Analyzer & Inspector**:
+     * Color-coded packet table (Sync, Follow_Up, Pdelay, MSRP, MVRP, 0x8B8C Leak) with protocol filter tabs, direction indicators, auto-scroll, and pause/resume.
+     * Inspector panel with hierarchical key-value field decoding and complete Hex Dump view.
+  5. **Dual Operation Modes (Live Hardware & Simulation)**:
+     * **Live Mode (`實機`)**: Connects to `telemetry_bridge.py` over WebSocket and Scapy Ethernet capture.
+     * **Simulation Mode (`模擬`)**: 100% self-contained offline rehearsal engine for client presentations without requiring hardware setup or network cables.
+  6. **Interactive Hover Glossary, Bilingual UI & Presenter Hotkeys**:
+     * Hovering any architectural component displays automotive principles and value propositions.
+     * Instant bilingual language toggle (**繁體中文** / **English**).
+     * Presenter hotkeys: `1`/`2`/`3` (trigger steps), `A` (auto-play), `R` (reset), `S` (toggle simulation), `L` (toggle language), `F` (fullscreen).
 
 ---
 
